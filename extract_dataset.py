@@ -28,9 +28,13 @@ def build_yolo_dataset(images_dir, shp_path, geojson_path, dem_path, xml_path, o
     # 1. Spatial Join to label anomalous modules based on the GeoJSON report
     joined = gpd.sjoin(gdf_all, gdf_anom, how="left", predicate="intersects")
     gdf_all["Label"] = "Normal"
+    gdf_all["Anomaly_Name"] = ""
     for idx, row in joined.iterrows():
         if isinstance(row.get("Anomaly"), str):
             gdf_all.loc[idx, "Label"] = row["Anomaly"]
+        val = row.get("name")
+        if isinstance(val, (str, int, float)) and str(val).strip():
+            gdf_all.loc[idx, "Anomaly_Name"] = str(val).strip()
             
     print(f"Dataset Split Details: {gdf_all['Label'].value_counts().to_dict()}")
     
@@ -39,6 +43,11 @@ def build_yolo_dataset(images_dir, shp_path, geojson_path, dem_path, xml_path, o
         os.makedirs(Path(output_dir) / safe_label, exist_ok=True)
 
     geoms, sindex, labels = gdf_all.geometry.values, gdf_all.sindex, gdf_all["Label"].values
+    
+    def safe_get(col):
+        return gdf_all[col].values if col in gdf_all.columns else np.array([""] * len(gdf_all))
+    
+    racks, panels, modules, anomaly_names = safe_get("Rack"), safe_get("Panel"), safe_get("Module"), safe_get("Anomaly_Name")
     
     import rasterio
     with rasterio.open(dem_path) as ds:
@@ -82,6 +91,7 @@ def build_yolo_dataset(images_dir, shp_path, geojson_path, dem_path, xml_path, o
             if idx in extracted: continue
             
             geom, label = geoms[idx], labels[idx]
+            rack, panel, mod_num, anom_key = racks[idx], panels[idx], modules[idx], anomaly_names[idx]
             
             # Undersample Normal class rigorously so anomalies actually get trained
             # Normal class drops 90% of samples (retains ~10%) to balance the distributions
@@ -101,8 +111,24 @@ def build_yolo_dataset(images_dir, shp_path, geojson_path, dem_path, xml_path, o
             xmax, ymax = min(IMG_W, int(u.max()) + 10), min(IMG_H, int(v.max()) + 10)
             
             if xmax - xmin < 12 or ymax - ymin < 12: continue
+            
+            # Make bounding box square to avoid distortion
+            side = max(xmax - xmin, ymax - ymin)
+            cx, cy = (xmin + xmax) // 2, (ymin + ymax) // 2
+            xmin, xmax = cx - side // 2, cx - side // 2 + side
+            ymin, ymax = cy - side // 2, cy - side // 2 + side
                 
             crop = img.crop((xmin, ymin, xmax, ymax))
+            
+            # Mask out background bleeding from adjacent panels (dim context)
+            from PIL import ImageDraw
+            mask = Image.new("L", crop.size, 0)
+            draw = ImageDraw.Draw(mask)
+            poly_coords = [(px - xmin, py - ymin) for px, py in zip(u, v)]
+            draw.polygon(poly_coords, outline=255, fill=255)
+            # Dim the background to 30% intensity so context is visible but anomaly defaults to the target panel
+            bg = crop.point(lambda p: int(p * 0.3))
+            crop = Image.composite(crop, bg, mask)
             
             # Binary map the original EXIF and APP4 drone thermal byte segments into the micro cropped panel 
             out_raw = io.BytesIO()
@@ -110,11 +136,30 @@ def build_yolo_dataset(images_dir, shp_path, geojson_path, dem_path, xml_path, o
             final_bytes = splice_metadata(raw, out_raw.getvalue())
             
             safe_label = str(label).replace("/", "_").replace(" ", "_")
-            out_name = Path(output_dir) / safe_label / f"{img_path.stem}_mod{idx}.jpg"
+            
+            suffix = []
+            if anom_key: suffix.append(f"key{anom_key}".replace(" ", ""))
+            if rack: suffix.append(f"R{rack}".replace(" ", ""))
+            if panel: suffix.append(f"P{panel}".replace(" ", ""))
+            if mod_num: suffix.append(f"M{mod_num}".replace(" ", ""))
+            
+            suffix_str = "_".join(suffix) if suffix else f"mod{idx}"
+            
+            out_name = Path(output_dir) / safe_label / f"{img_path.stem}_{suffix_str}.jpg"
+            out_name.parent.mkdir(parents=True, exist_ok=True)
             out_name.write_bytes(final_bytes)
             
             extracted.add(idx)
 
 if __name__ == "__main__":
     # We limit images to 200 to keep timeframe manageable right now
-    build_yolo_dataset("Image", "partial.shp", "1775925810686-report.geojson", "DEM.tif", "cameras.xml", "yolo_dataset", max_images=200)
+    base_folder = "training_data/dataset1"
+    build_yolo_dataset(
+        os.path.join(base_folder, "Image"), 
+        os.path.join(base_folder, "partial.shp"), 
+        os.path.join(base_folder, "1775925810686-report.geojson"), 
+        os.path.join(base_folder, "DEM.tif"), 
+        os.path.join(base_folder, "cameras.xml"), 
+        "yolo_dataset", 
+        max_images=200
+    )

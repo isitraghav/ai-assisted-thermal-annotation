@@ -42,3 +42,6 @@ folder1/
 .vscode/
 .idea/
 
+training_data/
+dist/
+build/

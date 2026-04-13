@@ -762,7 +762,12 @@ def process_image(
             else:
                 snapped_coords = pts
             
-            draw.polygon([tuple(p) for p in snapped_coords], fill=FILL_COLOR, outline=LINE_COLOR)
+            # Draw as bounding box rectangles rather than exact polygons
+            min_x = int(np.min(snapped_coords[:, 0]))
+            min_y = int(np.min(snapped_coords[:, 1]))
+            max_x = int(np.max(snapped_coords[:, 0]))
+            max_y = int(np.max(snapped_coords[:, 1]))
+            draw.rectangle([min_x, min_y, max_x, max_y], fill=FILL_COLOR, outline=LINE_COLOR)
             drew_any = True
             
         if drew_any:

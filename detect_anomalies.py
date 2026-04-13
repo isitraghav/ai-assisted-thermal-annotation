@@ -122,9 +122,25 @@ def process_images_and_infer(args):
             xmax, ymax = min(IMG_W, int(u.max()) + 10), min(IMG_H, int(v.max()) + 10)
             
             if xmax - xmin < 12 or ymax - ymin < 12: continue
+            
+            # Make bounding box square to avoid distortion
+            side = max(xmax - xmin, ymax - ymin)
+            cx, cy = (xmin + xmax) // 2, (ymin + ymax) // 2
+            xmin, xmax = cx - side // 2, cx - side // 2 + side
+            ymin, ymax = cy - side // 2, cy - side // 2 + side
                 
             # Crop the panel from the normalized thermal image
             crop = img.crop((xmin, ymin, xmax, ymax))
+            
+            # Mask out background bleeding from adjacent panels (dim context)
+            from PIL import ImageDraw
+            mask = Image.new("L", crop.size, 0)
+            draw = ImageDraw.Draw(mask)
+            poly_coords = [(px - xmin, py - ymin) for px, py in zip(u, v)]
+            draw.polygon(poly_coords, outline=255, fill=255)
+            # Dim the background to 30% intensity
+            bg = crop.point(lambda p: int(p * 0.3))
+            crop = Image.composite(crop, bg, mask)
             
             # Predict using YOLO (we pass the PIL image natively)
             # convert back to RGB just in case YOLO expects 3 channels even internally, or let YOLO handle it
@@ -135,28 +151,60 @@ def process_images_and_infer(args):
                 top1_conf = results[0].probs.top1conf.item()
                 top1_class = results[0].names[top1_idx]
                 
-                module_predictions[idx].append((top1_class, top1_conf))
+                module_predictions[idx].append({
+                    "class": top1_class, 
+                    "conf": top1_conf, 
+                    "image": img_path.name
+                })
 
     print("Aggregating predictions and generating GeoJSON...")
     anomalies = []
     
+    import datetime
     for idx, preds in module_predictions.items():
         # Aggregation logic: If any view sees an anomaly, flag it. 
         # Pick the anomaly prediction with the highest confidence.
-        non_normal_preds = [p for p in preds if p[0].lower() != "normal"]
+        non_normal_preds = [p for p in preds if p["class"].lower() != "normal"]
         
         if non_normal_preds:
             # Sort by confidence descending
-            best_pred = sorted(non_normal_preds, key=lambda x: x[1], reverse=True)[0]
-            final_class, final_conf = best_pred
+            best_pred = sorted(non_normal_preds, key=lambda x: x["conf"], reverse=True)[0]
+            final_class, final_conf, best_img = best_pred["class"], best_pred["conf"], best_pred["image"]
             
-            anomalies.append({
+            # Extract all properties from the original shapefile row
+            row_props = gdf_all.iloc[idx].drop("geometry").to_dict() if "geometry" in gdf_all.columns else gdf_all.iloc[idx].to_dict()
+            
+            cx, cy = geoms[idx].centroid.x, geoms[idx].centroid.y
+            now = datetime.datetime.now()
+            
+            anomaly_data = {
                 "geometry": geoms[idx],
                 "module_id": int(idx),
+                "Anomaly": final_class,
+                "Longitude": str(round(cx, 15)),
+                "Latitude": str(round(cy, 15)),
+                "Date": now.strftime("%d/%m/%Y"),
+                "Time": now.strftime("%I:%M:%S %p"),
+                "Image name": best_img,
+                "Hotspot": "2.1",
+                "Block": "",
+                "ID": "",
+                "Make": "",
+                "Watt": "",
+                "name": str(idx),
                 "predicted_anomaly": final_class,
                 "confidence": round(final_conf, 4),
                 "views_evaluated": len(preds)
-            })
+            }
+            # Merge shapefile properties (anomaly_data will override if there are key conflicts)
+            # However we want these specific keys even if they are empty
+            for k in anomaly_data.copy():
+                if k in row_props and row_props[k] and str(row_props[k]).strip():
+                    anomaly_data[k] = row_props[k]
+                    del row_props[k]
+            
+            anomaly_data = {**row_props, **anomaly_data}
+            anomalies.append(anomaly_data)
 
     if not anomalies:
         print("No anomalies detected!")
