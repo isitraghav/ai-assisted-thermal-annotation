@@ -9,14 +9,17 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 _ROOT = Path(__file__).parent
 
-if sys.platform == "win32":
+if getattr(sys, "frozen", False):
+    # PyInstaller bundle — DLLs/SOs are packed into dji_sdk_libs/ next to the exe
+    _ROOT        = Path(sys._MEIPASS)  # type: ignore[attr-defined]
+    _SDK_SUBPATH = "dji_sdk_libs"
+elif sys.platform == "win32":
     _SDK_SUBPATH = "dji_thermal_sdk_v1.8_20250829/tsdk-core/lib/windows/release_x64"
-    _LIB_NAME    = "libdirp.dll"
 else:
     _SDK_SUBPATH = "dji_thermal_sdk_v1.8_20250829/tsdk-core/lib/linux/release_x64"
-    _LIB_NAME    = "libdirp.so"
 
-SDK_DIR = str(_ROOT / _SDK_SUBPATH)
+_LIB_NAME = "libdirp.dll" if sys.platform == "win32" else "libdirp.so"
+SDK_DIR   = str(_ROOT / _SDK_SUBPATH)
 
 # On Windows, register the SDK dir so DLL dependencies resolve automatically
 if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
