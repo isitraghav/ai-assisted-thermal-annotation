@@ -263,6 +263,7 @@ class AnnotationPanel(QWidget):
             latitude=getattr(self, "_auto_lat", 0.0),
             block=self._ed_block.text().strip(),
             panel_id_full=self._ed_panel_id_full.text().strip(),
+            pixel_coords=self._pixel_coords,
         )
         self._btn_clear.setEnabled(True)
         self.annotation_saved.emit(rec)

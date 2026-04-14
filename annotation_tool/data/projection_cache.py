@@ -184,15 +184,5 @@ def _compute_delta_t(image_path: Path, pixel_dict: dict, delta_t_dict: dict):
 
         panel_temps = thermal[mask_arr]
 
-        # Bounding box for surroundings
-        ys, xs = np.where(mask_arr)
-        y0, y1 = max(0, ys.min() - 5), min(H, ys.max() + 6)
-        x0, x1 = max(0, xs.min() - 5), min(W, xs.max() + 6)
-        bbox_temps = thermal[y0:y1, x0:x1].ravel()
-        surround_temps = bbox_temps[~mask_arr[y0:y1, x0:x1].ravel()]
-
-        if len(surround_temps) < 4:
-            surround_temps = bbox_temps
-
-        delta_t = float(panel_temps.max()) - float(np.median(surround_temps))
+        delta_t = float(panel_temps.max()) - float(panel_temps.min())
         delta_t_dict[shp_idx] = round(delta_t, 2)

@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
     QGraphicsEllipseItem, QGraphicsTextItem, QGraphicsItem,
 )
 
-from annotation_tool.canvas.polygon_item import PolygonItem
+from annotation_tool.canvas.polygon_item import PolygonItem, PolygonVertex
 
 _ZOOM_FACTOR = 1.15
 _MARKER_RADIUS = 6
@@ -29,6 +29,7 @@ class ImageCanvas(QGraphicsView):
     """
 
     polygon_clicked = pyqtSignal(int)
+    polygon_modified = pyqtSignal(int, list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -56,6 +57,15 @@ class ImageCanvas(QGraphicsView):
 
         # Loading overlay text
         self._loading_text: QGraphicsTextItem | None = None
+        self._markings_visible = True
+
+    def toggle_markings(self):
+        """Toggle visibility of polygon items and markers."""
+        self._markings_visible = not self._markings_visible
+        for item in self._polygon_items.values():
+            item.setVisible(self._markings_visible)
+        for item in self._marker_items.values():
+            item.setVisible(self._markings_visible)
 
     # ------------------------------------------------------------------
     # Image loading
@@ -116,6 +126,7 @@ class ImageCanvas(QGraphicsView):
                 annotated=rec is not None,
                 anomaly_type=rec.anomaly if rec else None,
             )
+            item.setVisible(self._markings_visible)
             self._scene.addItem(item)
             self._polygon_items[shp_idx] = item
 
@@ -165,6 +176,14 @@ class ImageCanvas(QGraphicsView):
         if event.button() == Qt.LeftButton:
             scene_pos = self.mapToScene(event.pos())
             items = self._scene.items(scene_pos)
+            
+            if items:
+                top_item = items[0]
+                # If we clicked a draggable vertex handle, let it handle the drag
+                if isinstance(top_item, PolygonVertex):
+                    super().mousePressEvent(event)
+                    return
+
             clicked_poly = None
             for item in items:
                 if isinstance(item, PolygonItem):
@@ -182,7 +201,7 @@ class ImageCanvas(QGraphicsView):
                 clicked_poly.set_selected(True)
                 self._selected_shp_index = clicked_poly.shp_index()
                 self.polygon_clicked.emit(self._selected_shp_index)
-                event.accept()
+                super().mousePressEvent(event)
                 return
 
         super().mousePressEvent(event)
@@ -231,6 +250,7 @@ class ImageCanvas(QGraphicsView):
         cy = sum(p[1] for p in pts) / len(pts)
         r = _MARKER_RADIUS
         marker = _DraggableMarker(shp_idx, cx - r, cy - r, r * 2, r * 2)
+        marker.setVisible(self._markings_visible)
         self._scene.addItem(marker)
         self._marker_items[shp_idx] = marker
 

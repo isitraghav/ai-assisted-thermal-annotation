@@ -103,6 +103,7 @@ class AnnotationScreen(QWidget):
 
         self._canvas = ImageCanvas(self)
         self._canvas.polygon_clicked.connect(self._on_polygon_clicked)
+        self._canvas.polygon_modified.connect(self._on_polygon_modified)
         center.addWidget(self._canvas, stretch=1)
 
         self._panel = AnnotationPanel(self)
@@ -149,8 +150,9 @@ class AnnotationScreen(QWidget):
         # Save
         QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self._session.save)
 
-        # Zoom / fit
+        # Zoom / fit / view
         QShortcut(QKeySequence("F"),   self).activated.connect(self._canvas.fit_view)
+        QShortcut(QKeySequence("Q"),   self).activated.connect(self._canvas.toggle_markings)
         QShortcut(QKeySequence("+"),   self).activated.connect(lambda: self._canvas.scale(1.15, 1.15))
         QShortcut(QKeySequence("="),   self).activated.connect(lambda: self._canvas.scale(1.15, 1.15))
         QShortcut(QKeySequence("-"),   self).activated.connect(lambda: self._canvas.scale(1/1.15, 1/1.15))
@@ -219,9 +221,16 @@ class AnnotationScreen(QWidget):
 
     def _on_projection_done(self, stem: str, pixel_dict: dict, delta_t_dict: dict):
         # Only apply if this result matches the current image
-        current_stem = self._project.image_paths[self._project.current_image_idx].stem
-        if stem != current_stem:
+        current_img = self._project.image_paths[self._project.current_image_idx]
+        if stem != current_img.stem:
             return
+        
+        # Override with manual pixel_coords if available for this specific image
+        for shp_idx, rec in self._project.annotations.items():
+            if rec.image_name == current_img.name and getattr(rec, "pixel_coords", None):
+                if shp_idx in pixel_dict:
+                    pixel_dict[shp_idx] = rec.pixel_coords
+
         self._current_pixel_dict = pixel_dict
         self._current_delta_t_dict = delta_t_dict
         self._canvas.populate_polygons(pixel_dict, self._project.annotations)
@@ -239,6 +248,35 @@ class AnnotationScreen(QWidget):
     # ------------------------------------------------------------------
     # Polygon selection
     # ------------------------------------------------------------------
+
+    def _on_polygon_modified(self, shp_idx: int, new_coords: list):
+        self._current_pixel_dict[shp_idx] = new_coords
+        img_path = self._project.image_paths[self._project.current_image_idx]
+        
+        # We need to re-compute delta t
+        import copy
+        temp_dict = copy.deepcopy(self._current_delta_t_dict)
+        
+        try:
+            from annotation_tool.data.projection_cache import _compute_delta_t
+            # Recompute for just this modified dict
+            _compute_delta_t(img_path, {shp_idx: new_coords}, temp_dict)
+            self._current_delta_t_dict[shp_idx] = temp_dict.get(shp_idx)
+            
+            # also update the project instance if annotated
+            rec = self._project.annotations.get(shp_idx)
+            if rec:
+                rec.pixel_coords = new_coords
+                rec.delta_t = self._current_delta_t_dict[shp_idx]
+                self._project.annotations[shp_idx] = rec
+                self._session._dirty = True
+        except Exception as e:
+            print("Failed to recompute delta_t", e)
+            
+        # Reload panel with updated data
+        if self._canvas.get_selected_shp_index() == shp_idx:
+            self._on_polygon_clicked(shp_idx)
+
 
     def _on_polygon_clicked(self, shp_idx: int):
         coords = self._current_pixel_dict.get(shp_idx, [])

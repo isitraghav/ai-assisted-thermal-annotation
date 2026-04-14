@@ -63,6 +63,7 @@ class AnnotationRecord:
     latitude: float
     block: str = ""
     panel_id_full: str = ""
+    pixel_coords: list = None
 
     def to_dict(self) -> dict:
         return {
@@ -81,6 +82,7 @@ class AnnotationRecord:
             "latitude": self.latitude,
             "block": self.block,
             "panel_id_full": self.panel_id_full,
+            "pixel_coords": self.pixel_coords or [],
         }
 
     @classmethod
@@ -101,6 +103,7 @@ class AnnotationRecord:
             latitude=float(d.get("latitude", 0.0)),
             block=d.get("block", ""),
             panel_id_full=d.get("panel_id_full", ""),
+            pixel_coords=d.get("pixel_coords", []),
         )
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PyQt5.QtCore import Qt, QPointF
 from PyQt5.QtGui import QColor, QPen, QBrush, QPolygonF
-from PyQt5.QtWidgets import QGraphicsPolygonItem, QGraphicsItem
+from PyQt5.QtWidgets import QGraphicsPolygonItem, QGraphicsItem, QGraphicsEllipseItem
 
 # Per-category fill colors (RGBA)
 _CATEGORY_COLORS: dict[str, tuple[int, int, int, int]] = {
@@ -66,11 +66,36 @@ class PolygonItem(QGraphicsPolygonItem):
 
         self.setAcceptHoverEvents(True)
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        # Enable dragging the entire polygon
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setZValue(1)
 
+        self._handles: list[PolygonVertex] = []
         self._apply_style()
 
     # ------------------------------------------------------------------
+    def update_vertex(self, index: int, new_pos: QPointF):
+        poly = self.polygon()
+        poly[index] = new_pos
+        self.setPolygon(poly)
+
+    def notify_vertex_changed(self):
+        poly = self.polygon()
+        idx = 0
+        new_coords = []
+        for pt in self._pixel_coords:
+            if pt is None:
+                new_coords.append(None)
+            else:
+                new_p = poly[idx]
+                new_coords.append([new_p.x(), new_p.y()])
+                idx += 1
+        self._pixel_coords = new_coords
+        
+        view = self.scene().views()[0] if self.scene() and self.scene().views() else None
+        if view and hasattr(view, 'polygon_modified'):
+            view.polygon_modified.emit(self._shp_index, self._pixel_coords)
+
     def shp_index(self) -> int:
         return self._shp_index
 
@@ -81,9 +106,40 @@ class PolygonItem(QGraphicsPolygonItem):
         return self._anomaly_type
 
     # ------------------------------------------------------------------
+    def _convert_to_resize_box(self):
+        """Converts the arbitrary incoming polygon into a manageable 4-point rectangle/square."""
+        poly = self.polygon()
+        rect = poly.boundingRect()
+        
+        # A simple 4-corner bounding box for resizing
+        p1 = rect.topLeft()
+        p2 = rect.topRight()
+        p3 = rect.bottomRight()
+        p4 = rect.bottomLeft()
+        
+        new_poly = QPolygonF([p1, p2, p3, p4])
+        self.setPolygon(new_poly)
+        
+        self._pixel_coords = [
+            [p1.x(), p1.y()],
+            [p2.x(), p2.y()],
+            [p3.x(), p3.y()],
+            [p4.x(), p4.y()]
+        ]
+        
+        # Dispatch event so UI + Delta T calculations re-align
+        if self.scene() and self.scene().views():
+            view = self.scene().views()[0]
+            if hasattr(view, 'polygon_modified'):
+                view.polygon_modified.emit(self._shp_index, self._pixel_coords)
+
     def set_selected(self, selected: bool):
+        if selected and not self._selected:
+            self._convert_to_resize_box()
+            
         self._selected = selected
         self._apply_style()
+        self._update_handles()
 
     def set_annotated(self, anomaly_type: str | None):
         self._annotated = anomaly_type is not None
@@ -94,6 +150,21 @@ class PolygonItem(QGraphicsPolygonItem):
         self._annotated = False
         self._anomaly_type = None
         self._apply_style()
+
+    def _update_handles(self):
+        if self._selected:
+            if not self._handles:
+                poly = self.polygon()
+                for i in range(poly.count()):
+                    pt = poly.at(i)
+                    handle = PolygonVertex(i, self)
+                    handle.setPos(pt)
+                    self._handles.append(handle)
+        else:
+            for handle in self._handles:
+                if self.scene():
+                    self.scene().removeItem(handle)
+            self._handles.clear()
 
     # ------------------------------------------------------------------
     def _apply_style(self):
@@ -125,3 +196,26 @@ class PolygonItem(QGraphicsPolygonItem):
         if not self._selected:
             self._apply_style()
         super().hoverLeaveEvent(event)
+
+class PolygonVertex(QGraphicsEllipseItem):
+    """Draggable vertex handle for PolygonItem."""
+    def __init__(self, index: int, parent_polygon: PolygonItem):
+        super().__init__(-4, -4, 8, 8, parent_polygon)
+        self._index = index
+        self._polygon = parent_polygon
+        self.setBrush(QBrush(QColor(255, 0, 0)))
+        self.setPen(QPen(QColor(0, 0, 0), 1))
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        self.setZValue(10)
+        self.setCursor(Qt.CrossCursor)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and self.scene():
+            self._polygon.update_vertex(self._index, value)
+        return super().itemChange(change, value)
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        self._polygon.notify_vertex_changed()

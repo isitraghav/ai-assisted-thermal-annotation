@@ -54,6 +54,7 @@ class GeoJSONWriter:
                     "col": rec.col,
                     "Make": "",
                     "Watt": "",
+                    "pixel_coords": rec.pixel_coords,
                     "name": str(i),
                 },
             }
