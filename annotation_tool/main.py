@@ -37,15 +37,29 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # -----------------------------------------------------------------------
-# 2. Set LD_LIBRARY_PATH for the DJI Thermal SDK *before* any ctypes load
+# 2. Set library search path for the DJI Thermal SDK *before* any ctypes load
 # -----------------------------------------------------------------------
 if getattr(sys, "frozen", False):
     SDK_DIR = str(ROOT / "dji_sdk_libs")
+elif sys.platform == "win32":
+    SDK_DIR = str(ROOT / "dji_thermal_sdk_v1.8_20250829/tsdk-core/lib/windows/release_x64")
 else:
     SDK_DIR = str(ROOT / "dji_thermal_sdk_v1.8_20250829/tsdk-core/lib/linux/release_x64")
-existing_ld = os.environ.get("LD_LIBRARY_PATH", "")
-if SDK_DIR not in existing_ld:
-    os.environ["LD_LIBRARY_PATH"] = SDK_DIR + (":" + existing_ld if existing_ld else "")
+
+if sys.platform == "win32":
+    # Python 3.8+: register DLL directory so ctypes dependency chain resolves
+    if hasattr(os, "add_dll_directory"):
+        try:
+            os.add_dll_directory(SDK_DIR)
+        except OSError:
+            pass
+    existing_path = os.environ.get("PATH", "")
+    if SDK_DIR not in existing_path:
+        os.environ["PATH"] = SDK_DIR + os.pathsep + existing_path
+else:
+    existing_ld = os.environ.get("LD_LIBRARY_PATH", "")
+    if SDK_DIR not in existing_ld:
+        os.environ["LD_LIBRARY_PATH"] = SDK_DIR + (":" + existing_ld if existing_ld else "")
 
 # -----------------------------------------------------------------------
 # 3. Launch Qt application

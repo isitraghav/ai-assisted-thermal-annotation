@@ -40,29 +40,95 @@ Here are some examples of the automated anomaly bounding-box overlays on standar
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.11+
 - [DJI Thermal SDK v1.8+](https://developer.dji.com/thermal-sdk/) *(included in `dji_thermal_sdk_v1.8_20250829/`)*
-- Ultralytics (`pip install ultralytics`)
 
 ### Installation
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/yourusername/ai-assisted-thermal-annotation.git
    cd ai-assisted-thermal-annotation
    ```
 
-2. **Setup virtual environment (recommended):**
+2. **Create and activate a virtual environment:**
+
+   **Linux / macOS**
    ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
+   python3 -m venv .venv
+   source .venv/bin/activate
    ```
 
-3. **Install dependencies:**
+   **Windows (Command Prompt)**
+   ```cmd
+   python -m venv .venv
+   .venv\Scripts\activate.bat
+   ```
+
+   **Windows (PowerShell)**
+   ```powershell
+   python -m venv .venv
+   .venv\Scripts\Activate.ps1
+   ```
+   > If PowerShell blocks the script, run once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+
+3. **Install all dependencies:**
+
    ```bash
    pip install -r requirements.txt
    ```
-   *(Ensure you have OpenCV, Ultralytics, GDAL/Fiona, and Pandas installed)*
+
+---
+
+### Running the Annotation Tool
+
+**Linux / macOS**
+```bash
+python -m annotation_tool
+```
+
+**Windows**
+```cmd
+python -m annotation_tool
+```
+
+Or with [uv](https://github.com/astral-sh/uv) (no manual venv needed — works on both platforms):
+```bash
+uv run annotation_tool/main.py
+```
+
+---
+
+### Building a Standalone Executable
+
+The build is cross-platform — run these commands on the **target OS** (build on Windows to get a `.exe`, build on Linux to get a Linux binary).
+
+**Step 1 — install build dependencies:**
+```bash
+pip install -r requirements-build.txt
+```
+
+**Step 2 — build:**
+```bash
+python build_exe.py
+```
+
+The bundled app is written to `dist/ThermalAnnotationTool/`.
+
+**Step 3 — run the built executable:**
+
+**Linux / macOS**
+```bash
+./dist/ThermalAnnotationTool/ThermalAnnotationTool
+```
+
+**Windows**
+```cmd
+dist\ThermalAnnotationTool\ThermalAnnotationTool.exe
+```
+
+> **Windows note:** The DJI Thermal SDK Windows DLLs are already included in `dji_thermal_sdk_v1.8_20250829/tsdk-core/lib/windows/release_x64/` and are bundled automatically during the build.
 
 ---
 

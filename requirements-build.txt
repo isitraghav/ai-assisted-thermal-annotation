@@ -1,0 +1,12 @@
+# Dependencies for building the standalone executable (annotation tool only)
+# Install with: pip install -r requirements-build.txt
+#
+# Then build with:
+#   python build_exe.py          (uses uv inline script deps)
+# or directly:
+#   pyinstaller --clean -y annotation_tool.spec
+
+-r requirements.txt
+
+# PyInstaller (bundler)
+pyinstaller>=6.0

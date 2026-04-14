@@ -2,10 +2,14 @@
 """PyInstaller spec for Thermal Annotation Tool.
 
 Build with (from project root):
-    uv run --with pyinstaller pyinstaller annotation_tool.spec
+    python build_exe.py
+  or directly:
+    pyinstaller --clean -y annotation_tool.spec
 
-Output: dist/ThermalAnnotationTool/ThermalAnnotationTool
+Output: dist/ThermalAnnotationTool/ThermalAnnotationTool  (Linux)
+        dist/ThermalAnnotationTool/ThermalAnnotationTool.exe  (Windows)
 """
+import sys as _sys
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 from pathlib import Path
 
@@ -25,9 +29,13 @@ datas_qt,  bins_qt,  hidden_qt  = collect_all('PyQt5')
 # ---------------------------------------------------------------------------
 # DJI Thermal SDK shared libraries → bundled into dji_sdk_libs/
 # ---------------------------------------------------------------------------
-dji_sdk_src = project_root / "dji_thermal_sdk_v1.8_20250829/tsdk-core/lib/linux/release_x64"
-dji_binaries = [(str(f), "dji_sdk_libs") for f in dji_sdk_src.glob("*.so*")]
-dji_datas    = [(str(f), "dji_sdk_libs") for f in dji_sdk_src.glob("*.ini")]
+if _sys.platform == "win32":
+    dji_sdk_src = project_root / "dji_thermal_sdk_v1.8_20250829/tsdk-core/lib/windows/release_x64"
+    dji_binaries = [(str(f), "dji_sdk_libs") for f in dji_sdk_src.glob("*.dll")]
+else:
+    dji_sdk_src = project_root / "dji_thermal_sdk_v1.8_20250829/tsdk-core/lib/linux/release_x64"
+    dji_binaries = [(str(f), "dji_sdk_libs") for f in dji_sdk_src.glob("*.so*")]
+dji_datas = [(str(f), "dji_sdk_libs") for f in dji_sdk_src.glob("*.ini")]
 
 # ---------------------------------------------------------------------------
 # Assemble
