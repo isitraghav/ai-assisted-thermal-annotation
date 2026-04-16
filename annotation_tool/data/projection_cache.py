@@ -73,7 +73,6 @@ class ProjectionCache:
         from extractor import (
             make_metashape_projector, DemSampler,
             _camera_position_lla, _compute_footprint_bbox, _centroid_in_mask,
-            MASK_X0, MASK_X1, MASK_Y0, MASK_Y1,
         )
 
         pose = model.cameras.get(image_path.stem) if model else None
@@ -117,7 +116,8 @@ class ProjectionCache:
         # ΔT computation (requires DJI SDK — graceful fallback)
         delta_t_dict: dict[int, float] = {}
         try:
-            _compute_delta_t(image_path, pixel_dict, delta_t_dict)
+            _compute_delta_t(image_path, pixel_dict, delta_t_dict,
+                             getattr(project, "drone_model", "M3T"))
         except Exception:
             pass
 
@@ -148,7 +148,8 @@ def _densify_ring_to_px(ring_coords, projector, dem) -> list[tuple[float, float]
     return list(zip(u.tolist(), v.tolist()))
 
 
-def _compute_delta_t(image_path: Path, pixel_dict: dict, delta_t_dict: dict):
+def _compute_delta_t(image_path: Path, pixel_dict: dict, delta_t_dict: dict,
+                     drone_model: str = "M3T"):
     """Compute ΔT (hotspot − surroundings) for each panel using thermal array."""
     import sys
     ROOT = Path(__file__).parents[2]
@@ -156,7 +157,7 @@ def _compute_delta_t(image_path: Path, pixel_dict: dict, delta_t_dict: dict):
         sys.path.insert(0, str(ROOT))
     from dji_thermal import get_thermal_array
 
-    thermal = get_thermal_array(str(image_path))  # (512, 640) float32
+    thermal = get_thermal_array(str(image_path), drone_model)
     H, W = thermal.shape
 
     from PIL import Image, ImageDraw

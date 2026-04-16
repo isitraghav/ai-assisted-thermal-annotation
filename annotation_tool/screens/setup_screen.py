@@ -8,7 +8,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QGroupBox, QFormLayout, QFileDialog,
-    QMessageBox, QFrame,
+    QMessageBox, QFrame, QRadioButton, QButtonGroup,
 )
 
 from annotation_tool.data.project import load_project, ProjectState
@@ -43,6 +43,23 @@ class SetupScreen(QWidget):
         subtitle.setAlignment(Qt.AlignCenter)
         subtitle.setStyleSheet("color: #888; font-size: 13px;")
         outer.addWidget(subtitle)
+
+        # ---- Drone model ----
+        drone_box = QGroupBox("Drone Model")
+        drone_layout = QHBoxLayout(drone_box)
+        drone_layout.setSpacing(20)
+
+        self._drone_group = QButtonGroup(self)
+        self._rb_m3t = QRadioButton("DJI M3T  (640 × 512)")
+        self._rb_m4t = QRadioButton("DJI M4T  (1280 × 1024)")
+        self._rb_m3t.setChecked(True)
+        self._drone_group.addButton(self._rb_m3t)
+        self._drone_group.addButton(self._rb_m4t)
+        drone_layout.addStretch()
+        drone_layout.addWidget(self._rb_m3t)
+        drone_layout.addWidget(self._rb_m4t)
+        drone_layout.addStretch()
+        outer.addWidget(drone_box)
 
         # ---- Project files ----
         files_box = QGroupBox("Project Files")
@@ -234,8 +251,11 @@ class SetupScreen(QWidget):
         self._btn_start.setEnabled(False)
         self.repaint()
 
+        drone_model = "M4T" if self._rb_m4t.isChecked() else "M3T"
+
         try:
-            project = load_project(image_dir, shapefile, dem_path, cameras_xml, output_path)
+            project = load_project(image_dir, shapefile, dem_path, cameras_xml, output_path,
+                                   drone_model=drone_model)
         except Exception as e:
             self._status.setText(f"Failed to load project: {e}")
             self._btn_start.setText("Start Annotation →")

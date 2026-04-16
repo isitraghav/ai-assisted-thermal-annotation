@@ -61,9 +61,14 @@ from tqdm import tqdm
 # Constants
 # ---------------------------------------------------------------------------
 
-IMG_W, IMG_H = 640, 512
+DRONE_RESOLUTIONS: dict[str, tuple[int, int]] = {
+    "M3T": (640, 512),
+    "M4T": (1280, 1024),
+}
 
-# Middle 60% region in pixel coordinates
+IMG_W, IMG_H = 640, 512  # default M3T; overridden by --drone CLI arg
+
+# Middle 60% region in pixel coordinates (recomputed after CLI arg parsing)
 MASK_X0 = int(0.2 * IMG_W)   # 128
 MASK_X1 = int(0.8 * IMG_W)   # 512
 MASK_Y0 = int(0.2 * IMG_H)   # 102
@@ -603,13 +608,16 @@ def _compute_footprint_bbox(
 
 def _centroid_in_mask(geom, projector, dem: DemSampler) -> bool:
     """Return True if the geometry's centroid projects into the middle-60% region."""
+    W, H = projector.width, projector.height
+    mask_x0, mask_x1 = int(0.2 * W), int(0.8 * W)
+    mask_y0, mask_y1 = int(0.2 * H), int(0.8 * H)
     cx, cy_geo = geom.centroid.x, geom.centroid.y
     h = dem.sample_scalar(cx, cy_geo)
     u, v, front = projector(np.array([cx]), np.array([cy_geo]), np.array([h]))
     return bool(
         front[0]
-        and MASK_X0 <= u[0] < MASK_X1
-        and MASK_Y0 <= v[0] < MASK_Y1
+        and mask_x0 <= u[0] < mask_x1
+        and mask_y0 <= v[0] < mask_y1
     )
 
 
@@ -780,7 +788,10 @@ def process_image(
                 uc, vc, fc = projector(
                     np.array([cx_geo]), np.array([cy_geo]), np.array([h_c])
                 )
-                if fc[0] and MASK_X0 <= uc[0] < MASK_X1 and MASK_Y0 <= vc[0] < MASK_Y1:
+                _pw, _ph = projector.width, projector.height
+                _mx0, _mx1 = int(0.2 * _pw), int(0.8 * _pw)
+                _my0, _my1 = int(0.2 * _ph), int(0.8 * _ph)
+                if fc[0] and _mx0 <= uc[0] < _mx1 and _my0 <= vc[0] < _my1:
                     real_idx = candidate_idx[idx] if hasattr(candidate_idx, '__len__') else idx
                     rack  = gdf.iloc[real_idx].get("Rack",   "")
                     panel = gdf.iloc[real_idx].get("Panel",  "")
@@ -829,7 +840,19 @@ def main() -> None:
                         help="Draw Rack/Panel labels at polygon centroids")
     parser.add_argument("--max-images",  type=int, default=None,
                         help="Process at most N images (useful for quick tests)")
+    parser.add_argument("--drone",       choices=["M3T", "M4T"], default="M3T",
+                        help="Drone model — sets thermal image resolution (default: M3T)")
     args = parser.parse_args()
+
+    # Update global resolution constants for this run
+    global IMG_W, IMG_H, MASK_X0, MASK_X1, MASK_Y0, MASK_Y1, _MASK_BOX_PX, _COORD_CLAMP
+    IMG_W, IMG_H = DRONE_RESOLUTIONS[args.drone]
+    MASK_X0 = int(0.2 * IMG_W)
+    MASK_X1 = int(0.8 * IMG_W)
+    MASK_Y0 = int(0.2 * IMG_H)
+    MASK_Y1 = int(0.8 * IMG_H)
+    _MASK_BOX_PX = shapely.box(MASK_X0, MASK_Y0, MASK_X1, MASK_Y1)
+    _COORD_CLAMP = max(IMG_W, IMG_H) * 10
 
     image_dir = Path(args.image_dir)
     out_dir   = Path(args.output)

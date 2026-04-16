@@ -126,7 +126,7 @@ class AnnotationPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _setup_ui(self):
-        self.setFixedWidth(300)
+        self.setFixedWidth(360)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 6, 6, 6)
         outer.setSpacing(6)

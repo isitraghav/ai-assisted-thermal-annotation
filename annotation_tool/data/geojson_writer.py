@@ -11,7 +11,7 @@ from pathlib import Path
 import geopandas as gpd
 import shapely.geometry
 
-from annotation_tool.data.project import AnnotationRecord
+from annotation_tool.data.project import AnnotationRecord, exported_image_name
 
 
 class GeoJSONWriter:
@@ -43,7 +43,7 @@ class GeoJSONWriter:
                     "Latitude": str(rec.latitude),
                     "Date": rec.date,
                     "Time": rec.time,
-                    "Image name": rec.image_name,
+                    "Image name": exported_image_name(rec),
                     "Hotspot": str(rec.delta_t),
                     "Block": rec.block,
                     "ID": rec.panel_id_full,

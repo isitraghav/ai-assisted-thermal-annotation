@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from annotation_tool.data.project import ProjectState
+from annotation_tool.data.project import ProjectState, exported_image_name
 
 _LINE_WIDTH = 2
 
@@ -37,10 +37,6 @@ def _unique_path(out_dir: Path, name: str) -> Path:
     return p
 
 
-def _rec_label(rec) -> str:
-    """Build a filename label from annotation values, e.g. R1_P3_Cell."""
-    parts = [rec.rack, rec.panel, rec.anomaly.replace(" ", "_")]
-    return "_".join(p for p in parts if p)
 
 
 def export_annotated_images(project: ProjectState, cache) -> int:
@@ -99,8 +95,7 @@ def export_annotated_images(project: ProjectState, cache) -> int:
                 )
 
             composited = Image.alpha_composite(base_img.convert("RGBA"), overlay).convert("RGB")
-            label = _rec_label(rec)
-            composited.save(_unique_path(out_dir, f"{stem}_{label}.jpg"))
+            composited.save(_unique_path(out_dir, exported_image_name(rec)))
             exported += 1
 
     return exported

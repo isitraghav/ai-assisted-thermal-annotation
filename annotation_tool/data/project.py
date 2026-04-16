@@ -46,6 +46,18 @@ KEY_TO_ANOMALY: dict[str, str] = {
 }
 
 
+def exported_image_name(rec: "AnnotationRecord") -> str:
+    """Return the exported filename for an annotation, e.g. DJI_0001_R1_P3_Cell.jpg.
+
+    Used by both image_exporter and geojson_writer to keep names consistent.
+    """
+    from pathlib import Path as _Path
+    stem = _Path(rec.image_name).stem
+    parts = [rec.rack, rec.panel, rec.anomaly.replace(" ", "_")]
+    label = "_".join(p for p in parts if p)
+    return f"{stem}_{label}.jpg" if label else f"{stem}.jpg"
+
+
 @dataclass
 class AnnotationRecord:
     shp_index: int
@@ -128,6 +140,8 @@ class ProjectState:
 
     annotations: dict = field(default_factory=dict)  # shp_index → AnnotationRecord
 
+    drone_model: str = "M3T"
+
 
 def load_project(
     image_dir: Path,
@@ -135,6 +149,7 @@ def load_project(
     dem_path: Path,
     cameras_xml: Path,
     output_geojson: Path,
+    drone_model: str = "M3T",
 ) -> ProjectState:
     """Load all project data and return a ProjectState."""
     # These imports are available after main.py patches sys.path
@@ -186,4 +201,5 @@ def load_project(
         image_paths=image_paths,
         current_image_idx=0,
         annotations={},
+        drone_model=drone_model,
     )

@@ -41,8 +41,13 @@ except Exception as e:
 
 DIRP_HANDLE = ctypes.c_void_p
 
+DRONE_RESOLUTIONS: dict[str, tuple[int, int]] = {
+    "M3T": (640, 512),
+    "M4T": (1280, 1024),
+}
 
-def get_thermal_array(rjpeg_path):
+
+def get_thermal_array(rjpeg_path, drone_model: str = "M3T"):
     if libdirp is None:
         raise RuntimeError("DJI Thermal SDK not loaded")
 
@@ -56,15 +61,15 @@ def get_thermal_array(rjpeg_path):
     if ret != 0:
         raise ValueError(f"Failed to decode RJPEG (error {ret}): {rjpeg_path}")
 
-    # 640x512 resolution for M3T
-    img_buf = (ctypes.c_int16 * (640 * 512))()
+    w, h = DRONE_RESOLUTIONS.get(drone_model, (640, 512))
+    img_buf = (ctypes.c_int16 * (w * h))()
 
     ret2 = libdirp.dirp_measure(ph, img_buf, ctypes.sizeof(img_buf))
     if ret2 != 0:
         libdirp.dirp_destroy(ph)
         raise ValueError(f"Failed to measure thermal (error {ret2}): {rjpeg_path}")
 
-    arr = np.ctypeslib.as_array(img_buf).reshape((512, 640)).astype(np.float32)
+    arr = np.ctypeslib.as_array(img_buf).reshape((h, w)).astype(np.float32)
     arr = arr / 10.0  # Convert to Celsius
 
     libdirp.dirp_destroy(ph)

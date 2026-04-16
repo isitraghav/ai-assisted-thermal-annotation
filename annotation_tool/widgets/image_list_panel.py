@@ -6,11 +6,15 @@ import io
 from pathlib import Path
 
 from PyQt5.QtCore import Qt, QSize, pyqtSignal, QThread, QMutex
-from PyQt5.QtGui import QPixmap, QImage, QIcon
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem
+from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem,
+)
 
-THUMB_W, THUMB_H = 80, 60
-ITEM_HEIGHT = 80
+PANEL_W   = 200
+THUMB_W   = 190   # fits inside 200px panel with small margins
+THUMB_H   = 152   # 190 * 512/640 — maintains thermal 5:4 aspect ratio
+ITEM_H    = THUMB_H + 22   # thumb + name label + spacing
 
 
 class ThumbnailLoader(QThread):
@@ -59,6 +63,40 @@ class ThumbnailLoader(QThread):
                 pass
 
 
+class _ImageItemWidget(QWidget):
+    """Single list item: filename label on top, thumbnail below."""
+
+    def __init__(self, name: str):
+        super().__init__()
+        self._name = name
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(3, 3, 3, 2)
+        layout.setSpacing(2)
+
+        self._name_lbl = QLabel(name)
+        self._name_lbl.setAlignment(Qt.AlignCenter)
+        self._name_lbl.setStyleSheet("font-size: 10px; color: #ccc;")
+        self._name_lbl.setFixedHeight(16)
+        layout.addWidget(self._name_lbl)
+
+        self._thumb_lbl = QLabel()
+        self._thumb_lbl.setAlignment(Qt.AlignCenter)
+        self._thumb_lbl.setFixedSize(THUMB_W, THUMB_H)
+        self._thumb_lbl.setStyleSheet("background: #1a1a1a;")
+        layout.addWidget(self._thumb_lbl)
+
+    def set_pixmap(self, px: QPixmap):
+        self._thumb_lbl.setPixmap(
+            px.scaled(THUMB_W, THUMB_H, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        )
+
+    def set_count(self, count: int):
+        if count:
+            self._name_lbl.setText(f"{self._name}  [{count}]")
+        else:
+            self._name_lbl.setText(self._name)
+
+
 class ImageListPanel(QWidget):
     """Left sidebar showing all images as a scrollable list with thumbnails."""
 
@@ -66,9 +104,10 @@ class ImageListPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(200)
+        self.setFixedWidth(PANEL_W)
         self._image_paths: list[Path] = []
         self._annotation_counts: dict[int, int] = {}
+        self._item_widgets: list[_ImageItemWidget] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -80,8 +119,8 @@ class ImageListPanel(QWidget):
         layout.addWidget(header)
 
         self._list = QListWidget()
-        self._list.setIconSize(QSize(THUMB_W, THUMB_H))
         self._list.setSpacing(2)
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._list.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self._list)
 
@@ -92,12 +131,19 @@ class ImageListPanel(QWidget):
     def set_images(self, image_paths: list[Path]):
         self._image_paths = list(image_paths)
         self._annotation_counts.clear()
+        self._item_widgets.clear()
         self._list.clear()
+
         for i, p in enumerate(image_paths):
-            item = QListWidgetItem(p.name)
+            widget = _ImageItemWidget(p.name)
+            self._item_widgets.append(widget)
+
+            item = QListWidgetItem()
             item.setData(Qt.UserRole, i)
-            item.setSizeHint(QSize(200, ITEM_HEIGHT))
+            item.setSizeHint(QSize(PANEL_W, ITEM_H))
             self._list.addItem(item)
+            self._list.setItemWidget(item, widget)
+
             self._loader.enqueue(i, p)
 
     def set_current(self, idx: int):
@@ -109,13 +155,8 @@ class ImageListPanel(QWidget):
 
     def update_annotation_count(self, idx: int, count: int):
         self._annotation_counts[idx] = count
-        item = self._list.item(idx)
-        if item and 0 <= idx < len(self._image_paths):
-            name = self._image_paths[idx].name
-            if count:
-                item.setText(f"{name}\n{count} annotation(s)")
-            else:
-                item.setText(name)
+        if 0 <= idx < len(self._item_widgets):
+            self._item_widgets[idx].set_count(count)
 
     def _on_item_clicked(self, item: QListWidgetItem):
         idx = item.data(Qt.UserRole)
@@ -123,9 +164,8 @@ class ImageListPanel(QWidget):
             self.navigate.emit(idx)
 
     def _on_thumbnail_ready(self, idx: int, px: QPixmap):
-        item = self._list.item(idx)
-        if item:
-            item.setIcon(QIcon(px))
+        if 0 <= idx < len(self._item_widgets):
+            self._item_widgets[idx].set_pixmap(px)
 
     def closeEvent(self, event):
         self._loader.stop()
