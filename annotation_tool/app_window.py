@@ -38,12 +38,6 @@ class AppWindow(QMainWindow):
         act_new.triggered.connect(self._go_setup)
         file_menu.addAction(act_new)
 
-        self._act_save = QAction("Save", self)
-        self._act_save.setShortcut("Ctrl+S")
-        self._act_save.setEnabled(False)
-        self._act_save.triggered.connect(self._save)
-        file_menu.addAction(self._act_save)
-
         file_menu.addSeparator()
         act_quit = QAction("Quit", self)
         act_quit.setShortcut("Ctrl+Q")
@@ -66,7 +60,6 @@ class AppWindow(QMainWindow):
         self._annotation_screen.back_to_setup.connect(self._go_setup)
         self._stack.addWidget(self._annotation_screen)
         self._stack.setCurrentWidget(self._annotation_screen)
-        self._act_save.setEnabled(True)
 
         # Apply session/GeoJSON import if provided
         if session_info:
@@ -74,10 +67,6 @@ class AppWindow(QMainWindow):
 
     def _go_setup(self):
         self._stack.setCurrentWidget(self._setup_screen)
-
-    def _save(self):
-        if self._annotation_screen:
-            self._annotation_screen._session.save()
 
     def _show_shortcuts(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -103,12 +92,10 @@ class AppWindow(QMainWindow):
             "V — Vegetation<br>"
             "<br>"
             "<b>Actions</b><br>"
-            "Enter — Save annotation<br>"
             "Delete — Clear selected annotation<br>"
             "Escape — Deselect<br>"
             "Ctrl+Z — Undo<br>"
             "Ctrl+Y / Ctrl+Shift+Z — Redo<br>"
-            "Ctrl+S — Force save<br>"
             "<br>"
             "<b>View</b><br>"
             "F — Fit to window<br>"

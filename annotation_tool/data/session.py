@@ -12,6 +12,7 @@ from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 from annotation_tool.data.project import AnnotationRecord, ProjectState
 from annotation_tool.data.geojson_writer import GeoJSONWriter
 from annotation_tool.data.image_exporter import export_annotated_images
+from annotation_tool.data.training_exporter import TrainingExporter
 
 MAX_UNDO = 500
 
@@ -36,9 +37,15 @@ class SessionManager(QObject):
         self._dirty = False
 
         self._autosave_timer = QTimer(self)
-        self._autosave_timer.setInterval(30_000)  # 30 seconds
-        self._autosave_timer.timeout.connect(self._autosave)
-        self._autosave_timer.start()
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(500)
+        self._autosave_timer.timeout.connect(self.save)
+
+        training_dir = project.output_geojson.parent / "training_dataset"
+        self._training_exporter = TrainingExporter(training_dir)
+        self._image_paths_by_name: dict[str, Path] = {
+            p.name: p for p in project.image_paths
+        }
 
     # ------------------------------------------------------------------
     # Public API
@@ -56,7 +63,7 @@ class SessionManager(QObject):
         self._redo_stack.clear()
         if len(self._undo_stack) > MAX_UNDO:
             self._undo_stack.pop(0)
-        self._dirty = True
+        self.mark_dirty()
         self.changed.emit()
 
     def undo(self) -> Optional[HistoryEntry]:
@@ -69,7 +76,7 @@ class SessionManager(QObject):
             self._project.annotations.pop(entry.shp_index, None)
         else:
             self._project.annotations[entry.shp_index] = entry.before
-        self._dirty = True
+        self.mark_dirty()
         self.changed.emit()
         return entry
 
@@ -83,7 +90,7 @@ class SessionManager(QObject):
             self._project.annotations.pop(entry.shp_index, None)
         else:
             self._project.annotations[entry.shp_index] = entry.after
-        self._dirty = True
+        self.mark_dirty()
         self.changed.emit()
         return entry
 
@@ -103,6 +110,13 @@ class SessionManager(QObject):
             )
             self._save_session_json()
             n_img = export_annotated_images(self._project, self._cache)
+            try:
+                self._training_exporter.export(
+                    self._project.annotations,
+                    self._image_paths_by_name,
+                )
+            except Exception as te:
+                print(f"Training export warning: {te}")
             self._dirty = False
             n = len(self._project.annotations)
             self.saved.emit(
@@ -213,9 +227,9 @@ class SessionManager(QObject):
     # Internal
     # ------------------------------------------------------------------
 
-    def _autosave(self):
-        if self._dirty:
-            self.save()
+    def mark_dirty(self):
+        self._dirty = True
+        self._autosave_timer.start()
 
     def _save_session_json(self):
         data = {

@@ -145,9 +145,7 @@ class AnnotationScreen(QWidget):
                 lambda _k=k.lower(): self._key_annotate(_k)
             )
 
-        # Save / Clear
-        QShortcut(QKeySequence(Qt.Key_Return), self).activated.connect(self._panel.trigger_save)
-        QShortcut(QKeySequence(Qt.Key_Enter),  self).activated.connect(self._panel.trigger_save)
+        # Clear
         QShortcut(QKeySequence(Qt.Key_Delete), self).activated.connect(self._clear_selected)
         QShortcut(QKeySequence(Qt.Key_Escape), self).activated.connect(self._deselect)
 
@@ -155,9 +153,6 @@ class AnnotationScreen(QWidget):
         QShortcut(QKeySequence("Ctrl+Z"),       self).activated.connect(self._undo)
         QShortcut(QKeySequence("Ctrl+Y"),        self).activated.connect(self._redo)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self).activated.connect(self._redo)
-
-        # Save
-        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self._session.save)
 
         # Zoom / fit / view / toggle
         QShortcut(QKeySequence("F"),   self).activated.connect(self._canvas.fit_view)
@@ -288,7 +283,7 @@ class AnnotationScreen(QWidget):
                 rec.pixel_coords = new_coords
                 rec.delta_t = self._current_delta_t_dict[shp_idx]
                 self._project.annotations[shp_idx] = rec
-                self._session._dirty = True
+                self._session.mark_dirty()
         except Exception as e:
             print("Failed to recompute delta_t", e)
             

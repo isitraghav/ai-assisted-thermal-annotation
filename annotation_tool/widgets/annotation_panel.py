@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -31,6 +31,13 @@ class AnnotationPanel(QWidget):
         self._delta_t_auto: float | None = None
         self._setup_ui()
 
+        self._confirm_timer = QTimer(self)
+        self._confirm_timer.setSingleShot(True)
+        self._confirm_timer.setInterval(500)
+        self._confirm_timer.timeout.connect(self._auto_confirm)
+
+        self._connect_field_signals()
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -52,6 +59,7 @@ class AnnotationPanel(QWidget):
         auto_col: str = "",
     ):
         """Populate the panel for the given polygon."""
+        self._confirm_timer.stop()
         self._shp_index = shp_index
         self._pixel_coords = pixel_coords
         self._auto_lon = auto_lon
@@ -64,6 +72,15 @@ class AnnotationPanel(QWidget):
         dt_text = f"{auto_delta_t:.2f} °C" if auto_delta_t is not None else "—"
         self._lbl_delta_t.setText(dt_text)
         self._lbl_panel_id.setText(f"#{shp_index}")
+
+        _fields = [
+            self._ed_rack, self._ed_panel, self._ed_module,
+            self._ed_row, self._ed_col, self._ed_delta_t,
+            self._ed_block, self._ed_panel_id_full,
+        ]
+        for w in _fields:
+            w.blockSignals(True)
+        self._anomaly_group.blockSignals(True)
 
         if existing_rec:
             self._ed_rack.setText(existing_rec.rack)
@@ -89,9 +106,12 @@ class AnnotationPanel(QWidget):
             self._ed_block.setText("")
             self._ed_panel_id_full.setText("")
 
+        for w in _fields:
+            w.blockSignals(False)
+        self._anomaly_group.blockSignals(False)
+
         self._auto_date = auto_date
         self._auto_time = auto_time
-        self._btn_save.setEnabled(True)
         self._btn_clear.setEnabled(existing_rec is not None)
         _checked = self._anomaly_group.checkedButton()
         if _checked:
@@ -109,16 +129,17 @@ class AnnotationPanel(QWidget):
     def trigger_save(self):
         """Programmatically trigger save (e.g. after key-press)."""
         if self._shp_index is not None:
+            self._confirm_timer.stop()
             self._save()
 
     def clear_selection(self):
         """Reset panel to no-selection state."""
+        self._confirm_timer.stop()
         self._shp_index = None
         self._lbl_panel_id.setText("—")
         self._lbl_date.setText("—")
         self._lbl_time.setText("—")
         self._lbl_delta_t.setText("—")
-        self._btn_save.setEnabled(False)
         self._btn_clear.setEnabled(False)
 
     # ------------------------------------------------------------------
@@ -219,12 +240,6 @@ class AnnotationPanel(QWidget):
 
         # Action buttons
         btn_layout = QHBoxLayout()
-        self._btn_save = QPushButton("Save [Enter]")
-        self._btn_save.setEnabled(False)
-        self._btn_save.clicked.connect(self._save)
-        self._btn_save.setStyleSheet("background-color: #2a7a2a; color: white; font-weight: bold; padding: 6px;")
-        btn_layout.addWidget(self._btn_save)
-
         self._btn_clear = QPushButton("Clear [Del]")
         self._btn_clear.setEnabled(False)
         self._btn_clear.clicked.connect(self._clear)
@@ -256,6 +271,23 @@ class AnnotationPanel(QWidget):
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _connect_field_signals(self):
+        for ed in (self._ed_rack, self._ed_panel, self._ed_module,
+                   self._ed_row, self._ed_col, self._ed_delta_t,
+                   self._ed_block, self._ed_panel_id_full):
+            ed.textChanged.connect(self._on_field_changed)
+        self._anomaly_group.buttonToggled.connect(
+            lambda btn, checked: self._on_field_changed()
+        )
+
+    def _on_field_changed(self, *args):
+        if self._shp_index is not None:
+            self._confirm_timer.start()
+
+    def _auto_confirm(self):
+        if self._shp_index is not None:
+            self._save()
 
     def _save(self):
         if self._shp_index is None:

@@ -22,13 +22,14 @@ _CATEGORY_COLORS: dict[str, tuple[int, int, int, int]] = {
     "Vegetation":            (50,  160, 50,  100),
 }
 
-_COLOR_UNANNOTATED_FILL = QColor(0, 255, 0, 30)
-_COLOR_UNANNOTATED_LINE = QColor(0, 255, 0, 200)
+_COLOR_UNANNOTATED_FILL = QColor(255, 255, 255, 20)
+_COLOR_UNANNOTATED_LINE = QColor(255, 255, 255, 200)
 _COLOR_ANNOTATED_LINE   = QColor(255, 165, 0, 220)
-_COLOR_SELECTED_FILL    = QColor(255, 255, 0, 120)
-_COLOR_SELECTED_LINE    = QColor(255, 255, 0, 255)
-_LINE_WIDTH_NORMAL  = 1.0
-_LINE_WIDTH_SELECTED = 2.0
+_COLOR_SELECTED_FILL    = QColor(180, 0, 0, 60)
+_COLOR_SELECTED_LINE    = QColor(180, 0, 0, 255)
+_LINE_WIDTH_NORMAL   = 1.0
+_LINE_WIDTH_SELECTED = 2.5
+_SELECTION_INSET     = 5  # pixels inset on each side when selected
 
 
 class PolygonItem(QGraphicsPolygonItem):
@@ -183,6 +184,17 @@ class PolygonItem(QGraphicsPolygonItem):
 
         self.setPen(pen)
         self.setBrush(brush)
+
+    # ------------------------------------------------------------------
+    def paint(self, painter, option, widget=None):
+        if self._selected:
+            i = _SELECTION_INSET
+            rect = self.polygon().boundingRect().adjusted(i, i, -i, -i)
+            painter.setBrush(self.brush())
+            painter.setPen(self.pen())
+            painter.drawRect(rect)
+        else:
+            super().paint(painter, option, widget)
 
     # ------------------------------------------------------------------
     def hoverEnterEvent(self, event):
