@@ -167,10 +167,9 @@ def load_project(
     # Load Metashape model
     model = load_metashape_model(cameras_xml)
 
-    # Collect images
-    image_paths = sorted(
-        list(image_dir.glob("*.JPG")) + list(image_dir.glob("*.jpg"))
-    )
+    # Collect images (deduplicate in case .JPG and .jpg resolve to same file)
+    _raw = sorted(list(image_dir.glob("*.JPG")) + list(image_dir.glob("*.jpg")))
+    image_paths = [Path(p) for p in dict.fromkeys(str(p) for p in _raw)]
 
     return ProjectState(
         image_dir=image_dir,

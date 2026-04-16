@@ -24,11 +24,30 @@ def _split_subpolygons(coords: list) -> list[list[tuple[float, float]]]:
     return polys or []
 
 
-def export_annotated_images(project: ProjectState, cache) -> int:
-    """Render every image that has annotations and save to annotated_images/.
+def _unique_path(out_dir: Path, name: str) -> Path:
+    """Return a path that doesn't collide with existing files."""
+    p = out_dir / name
+    if not p.exists():
+        return p
+    stem, ext = name.rsplit(".", 1) if "." in name else (name, "jpg")
+    counter = 1
+    while p.exists():
+        p = out_dir / f"{stem}_{counter}.{ext}"
+        counter += 1
+    return p
 
-    Draws all visible polygons (unannotated green, annotated colored) on a
-    copy of the original thermal image.  Returns the number of files written.
+
+def _rec_label(rec) -> str:
+    """Build a filename label from annotation values, e.g. R1_P3_Cell."""
+    parts = [rec.rack, rec.panel, rec.anomaly.replace(" ", "_")]
+    return "_".join(p for p in parts if p)
+
+
+def export_annotated_images(project: ProjectState, cache) -> int:
+    """Export one full image per annotated panel, highlighting that panel only.
+
+    Output: annotated_images/<stem>_<rack>_<panel>_<anomaly>.jpg
+    Returns number of files written.
     """
     from PIL import Image, ImageDraw
 
@@ -46,7 +65,7 @@ def export_annotated_images(project: ProjectState, cache) -> int:
         stem = Path(image_name).stem
         cached = cache.get(stem)
         if cached is None:
-            continue  # projection not yet computed for this image
+            continue
 
         pixel_dict, _ = cached
 
@@ -59,14 +78,14 @@ def export_annotated_images(project: ProjectState, cache) -> int:
         except Exception:
             continue
 
-        overlay = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-
-        # Annotated polygons only — white border, no fill
         for rec in recs:
             coords = pixel_dict.get(rec.shp_index)
             if not coords:
                 continue
+
+            overlay = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(overlay)
+
             for poly_pts in _split_subpolygons(coords):
                 min_x = min(pt[0] for pt in poly_pts)
                 min_y = min(pt[1] for pt in poly_pts)
@@ -79,8 +98,9 @@ def export_annotated_images(project: ProjectState, cache) -> int:
                     width=_LINE_WIDTH,
                 )
 
-        composited = Image.alpha_composite(base_img.convert("RGBA"), overlay)
-        composited.convert("RGB").save(out_dir / image_name)
-        exported += 1
+            composited = Image.alpha_composite(base_img.convert("RGBA"), overlay).convert("RGB")
+            label = _rec_label(rec)
+            composited.save(_unique_path(out_dir, f"{stem}_{label}.jpg"))
+            exported += 1
 
     return exported

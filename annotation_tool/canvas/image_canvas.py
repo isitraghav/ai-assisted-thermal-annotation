@@ -59,6 +59,10 @@ class ImageCanvas(QGraphicsView):
         self._loading_text: QGraphicsTextItem | None = None
         self._markings_visible = True
 
+    @property
+    def markings_visible(self) -> bool:
+        return self._markings_visible
+
     def toggle_markings(self):
         """Toggle visibility of polygon items and markers."""
         self._markings_visible = not self._markings_visible

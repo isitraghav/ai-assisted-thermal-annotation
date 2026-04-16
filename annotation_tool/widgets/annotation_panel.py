@@ -6,8 +6,8 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QComboBox, QPushButton, QGroupBox, QFormLayout,
-    QSizePolicy, QFrame, QScrollArea,
+    QPushButton, QGroupBox, QFormLayout,
+    QSizePolicy, QFrame, QScrollArea, QButtonGroup, QRadioButton,
 )
 
 from annotation_tool.data.project import ANOMALY_TYPES, AnnotationRecord
@@ -72,7 +72,7 @@ class AnnotationPanel(QWidget):
             self._ed_row.setText(existing_rec.row)
             self._ed_col.setText(existing_rec.col)
             idx = ANOMALY_TYPES.index(existing_rec.anomaly) if existing_rec.anomaly in ANOMALY_TYPES else 0
-            self._cb_anomaly.setCurrentIndex(idx)
+            self._radio_buttons[idx].setChecked(True)
             dt_val = str(existing_rec.delta_t) if existing_rec.delta_t else (str(auto_delta_t) if auto_delta_t is not None else "")
             self._ed_delta_t.setText(dt_val)
             self._ed_block.setText(existing_rec.block)
@@ -83,7 +83,7 @@ class AnnotationPanel(QWidget):
             self._ed_module.setText(auto_module)
             self._ed_row.setText(auto_row)
             self._ed_col.setText(auto_col)
-            self._cb_anomaly.setCurrentIndex(0)
+            self._radio_buttons[0].setChecked(True)
             dt_default = f"{auto_delta_t:.2f}" if auto_delta_t is not None else ""
             self._ed_delta_t.setText(dt_default)
             self._ed_block.setText("")
@@ -93,14 +93,16 @@ class AnnotationPanel(QWidget):
         self._auto_time = auto_time
         self._btn_save.setEnabled(True)
         self._btn_clear.setEnabled(existing_rec is not None)
-        self._cb_anomaly.setFocus()
+        _checked = self._anomaly_group.checkedButton()
+        if _checked:
+            _checked.setFocus()
 
     def set_anomaly_by_key(self, key: str) -> bool:
         """Set anomaly type by shortcut key and return True if valid."""
         from annotation_tool.data.project import KEY_TO_ANOMALY
         anomaly = KEY_TO_ANOMALY.get(key.lower())
         if anomaly and anomaly in ANOMALY_TYPES:
-            self._cb_anomaly.setCurrentIndex(ANOMALY_TYPES.index(anomaly))
+            self._radio_buttons[ANOMALY_TYPES.index(anomaly)].setChecked(True)
             return True
         return False
 
@@ -180,9 +182,26 @@ class AnnotationPanel(QWidget):
         self._ed_col.setPlaceholderText("e.g. 1")
         props_layout.addRow("col:", self._ed_col)
 
-        self._cb_anomaly = QComboBox()
-        self._cb_anomaly.addItems(ANOMALY_TYPES)
-        props_layout.addRow("Defect:", self._cb_anomaly)
+        self._anomaly_group = QButtonGroup(self)
+        self._anomaly_group.setExclusive(True)
+        self._radio_buttons: list[QRadioButton] = []
+
+        _scroll = QScrollArea()
+        _scroll.setFixedHeight(180)
+        _scroll.setWidgetResizable(True)
+        _scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        _radio_container = QWidget()
+        _radio_layout = QVBoxLayout(_radio_container)
+        _radio_layout.setContentsMargins(2, 2, 2, 2)
+        _radio_layout.setSpacing(1)
+        for i, anomaly in enumerate(ANOMALY_TYPES):
+            btn = QRadioButton(anomaly)
+            self._anomaly_group.addButton(btn, i)
+            _radio_layout.addWidget(btn)
+            self._radio_buttons.append(btn)
+        self._radio_buttons[0].setChecked(True)
+        _scroll.setWidget(_radio_container)
+        props_layout.addRow("Defect:", _scroll)
 
         self._ed_delta_t = QLineEdit()
         self._ed_delta_t.setPlaceholderText("ΔT in °C")
@@ -222,7 +241,7 @@ class AnnotationPanel(QWidget):
             "7=Part.String   8=Phys.Damage",
             "9=Shading       0=Str.Offline",
             "S=Short Circuit V=Vegetation",
-            "←/→ prev/next image",
+            "←/→/A/D/N/M prev/next image",
             "Ctrl+Z undo  Ctrl+Y redo",
             "F = fit to window",
             "Scroll = zoom  Alt+drag = pan",
@@ -247,9 +266,10 @@ class AnnotationPanel(QWidget):
         except ValueError:
             delta_t = self._delta_t_auto or 0.0
 
+        _checked = self._anomaly_group.checkedButton()
         rec = AnnotationRecord(
             shp_index=self._shp_index,
-            anomaly=self._cb_anomaly.currentText(),
+            anomaly=_checked.text() if _checked else ANOMALY_TYPES[0],
             rack=self._ed_rack.text().strip(),
             panel=self._ed_panel.text().strip(),
             module=self._ed_module.text().strip(),

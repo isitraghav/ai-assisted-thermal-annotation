@@ -21,6 +21,7 @@ from annotation_tool.data.projection_cache import ProjectionCache
 from annotation_tool.data.session import SessionManager, HistoryEntry
 from annotation_tool.widgets.annotation_panel import AnnotationPanel
 from annotation_tool.widgets.image_navigator import ImageNavigator
+from annotation_tool.widgets.image_list_panel import ImageListPanel
 from annotation_tool.workers.projection_worker import ProjectionWorker
 
 
@@ -55,6 +56,7 @@ class AnnotationScreen(QWidget):
 
         # Load first image
         if project.image_paths:
+            self._image_list.set_images(project.image_paths)
             self._navigate_to(project.current_image_idx)
 
     # ------------------------------------------------------------------
@@ -96,15 +98,20 @@ class AnnotationScreen(QWidget):
         self._navigator.navigate.connect(self._navigate_to)
         layout.addWidget(self._navigator)
 
-        # Center row: canvas + panel
+        # Center row: image list + canvas + panel
         center = QHBoxLayout()
         center.setContentsMargins(0, 0, 0, 0)
         center.setSpacing(0)
+
+        self._image_list = ImageListPanel(self)
+        self._image_list.navigate.connect(self._navigate_to)
+        center.addWidget(self._image_list)
 
         self._canvas = ImageCanvas(self)
         self._canvas.polygon_clicked.connect(self._on_polygon_clicked)
         self._canvas.polygon_modified.connect(self._on_polygon_modified)
         center.addWidget(self._canvas, stretch=1)
+        self._navigator.toggle_markings.connect(self._toggle_markings)
 
         self._panel = AnnotationPanel(self)
         self._panel.annotation_saved.connect(self._on_annotation_saved)
@@ -128,6 +135,8 @@ class AnnotationScreen(QWidget):
         QShortcut(QKeySequence(Qt.Key_Left),  self).activated.connect(self._prev_image)
         QShortcut(QKeySequence("D"),          self).activated.connect(self._next_image)
         QShortcut(QKeySequence("A"),          self).activated.connect(self._prev_image)
+        QShortcut(QKeySequence("N"),          self).activated.connect(self._next_image)
+        QShortcut(QKeySequence("M"),          self).activated.connect(self._prev_image)
 
         # Annotation keys
         for key in list("1234567890") + ["s", "v", "S", "V"]:
@@ -150,9 +159,9 @@ class AnnotationScreen(QWidget):
         # Save
         QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self._session.save)
 
-        # Zoom / fit / view
+        # Zoom / fit / view / toggle
         QShortcut(QKeySequence("F"),   self).activated.connect(self._canvas.fit_view)
-        QShortcut(QKeySequence("Q"),   self).activated.connect(self._canvas.toggle_markings)
+        QShortcut(QKeySequence("Q"),   self).activated.connect(self._toggle_markings)
         QShortcut(QKeySequence("+"),   self).activated.connect(lambda: self._canvas.scale(1.15, 1.15))
         QShortcut(QKeySequence("="),   self).activated.connect(lambda: self._canvas.scale(1.15, 1.15))
         QShortcut(QKeySequence("-"),   self).activated.connect(lambda: self._canvas.scale(1/1.15, 1/1.15))
@@ -164,6 +173,15 @@ class AnnotationScreen(QWidget):
             self._key_annotate(key)
             return
         super().keyPressEvent(event)
+
+    # ------------------------------------------------------------------
+    # Toggle markings
+    # ------------------------------------------------------------------
+
+    def _toggle_markings(self):
+        """Toggle polygon visibility and keep navigator button in sync."""
+        self._canvas.toggle_markings()
+        self._navigator.set_toggle_state(self._canvas.markings_visible)
 
     # ------------------------------------------------------------------
     # Navigation
@@ -185,6 +203,7 @@ class AnnotationScreen(QWidget):
 
         self._canvas.load_image(img_path)
         self._update_navigator()
+        self._image_list.set_current(idx)
 
         # Launch projection worker
         self._worker = ProjectionWorker(img_path, self._cache, parent=self)
@@ -426,6 +445,10 @@ class AnnotationScreen(QWidget):
             filename=filename,
             annotated=len(self._project.annotations),
         )
+        img_count = sum(
+            1 for r in self._project.annotations.values() if r.image_name == filename
+        )
+        self._image_list.update_annotation_count(idx, img_count)
 
     def _on_saved(self, msg: str):
         self._status_bar.showMessage(msg)
