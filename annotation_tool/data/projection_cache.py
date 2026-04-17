@@ -118,8 +118,8 @@ class ProjectionCache:
         try:
             _compute_delta_t(image_path, pixel_dict, delta_t_dict,
                              getattr(project, "drone_model", "M3T"))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"delta_t compute failed for {image_path.name}: {e}")
 
         return pixel_dict, delta_t_dict
 

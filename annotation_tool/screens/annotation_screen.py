@@ -9,7 +9,7 @@ from pathlib import Path
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel,
-    QShortcut, QMessageBox, QStatusBar,
+    QShortcut, QMessageBox, QStatusBar, QSplitter,
 )
 from PyQt5.QtGui import QKeySequence
 
@@ -98,27 +98,29 @@ class AnnotationScreen(QWidget):
         self._navigator.navigate.connect(self._navigate_to)
         layout.addWidget(self._navigator)
 
-        # Center row: image list + canvas + panel
-        center = QHBoxLayout()
-        center.setContentsMargins(0, 0, 0, 0)
-        center.setSpacing(0)
+        # Center row: image list + canvas + panel (resizable via splitter)
+        self._splitter = QSplitter(Qt.Horizontal)
+        self._splitter.setContentsMargins(0, 0, 0, 0)
 
         self._image_list = ImageListPanel(self)
         self._image_list.navigate.connect(self._navigate_to)
-        center.addWidget(self._image_list)
+        self._splitter.addWidget(self._image_list)
 
         self._canvas = ImageCanvas(self)
         self._canvas.polygon_clicked.connect(self._on_polygon_clicked)
         self._canvas.polygon_modified.connect(self._on_polygon_modified)
-        center.addWidget(self._canvas, stretch=1)
         self._navigator.toggle_markings.connect(self._toggle_markings)
+        self._splitter.addWidget(self._canvas)
 
         self._panel = AnnotationPanel(self)
         self._panel.annotation_saved.connect(self._on_annotation_saved)
         self._panel.annotation_cleared.connect(self._on_annotation_cleared)
-        center.addWidget(self._panel)
+        self._splitter.addWidget(self._panel)
 
-        layout.addLayout(center, stretch=1)
+        self._splitter.setSizes([200, 900, 360])
+        self._splitter.setStretchFactor(1, 1)
+
+        layout.addWidget(self._splitter, stretch=1)
 
         # Status bar
         self._status_bar = QStatusBar(self)
@@ -139,7 +141,7 @@ class AnnotationScreen(QWidget):
         QShortcut(QKeySequence("M"),          self).activated.connect(self._prev_image)
 
         # Annotation keys
-        for key in list("1234567890") + ["s", "v", "S", "V"]:
+        for key in list("1234567890") + ["s", "v", "d", "S", "V", "D"]:
             k = key
             QShortcut(QKeySequence(k), self).activated.connect(
                 lambda _k=k.lower(): self._key_annotate(_k)
@@ -248,6 +250,12 @@ class AnnotationScreen(QWidget):
         self._current_pixel_dict = pixel_dict
         self._current_delta_t_dict = delta_t_dict
         self._canvas.populate_polygons(pixel_dict, self._project.annotations)
+
+        # If panel has a polygon selected for this image with no delta_t yet, update it
+        sel = self._panel.selected_shp_index
+        if sel is not None and sel in delta_t_dict:
+            self._panel.update_delta_t(delta_t_dict[sel])
+
         n = len(pixel_dict)
         self._status_bar.showMessage(
             f"{self._project.image_paths[self._project.current_image_idx].name} — "
@@ -287,6 +295,10 @@ class AnnotationScreen(QWidget):
         except Exception as e:
             print("Failed to recompute delta_t", e)
             
+        # Move marker to new position
+        if shp_idx in self._project.annotations:
+            self._canvas.add_or_update_marker(shp_idx, new_coords)
+
         # Reload panel with updated data
         if self._canvas.get_selected_shp_index() == shp_idx:
             self._on_polygon_clicked(shp_idx)

@@ -11,6 +11,9 @@ from PyQt5.QtWidgets import (
     QMessageBox, QFrame, QRadioButton, QButtonGroup,
 )
 
+import shutil
+import tempfile
+
 from annotation_tool.data.project import load_project, ProjectState
 
 
@@ -74,8 +77,20 @@ class SetupScreen(QWidget):
 
         self._ed_shapefile = QLineEdit()
         self._ed_shapefile.setPlaceholderText("Panel polygon shapefile (.shp)")
-        files_layout.addRow("Shapefile:", self._make_browse_row(
+        files_layout.addRow("Shapefile (.shp):", self._make_browse_row(
             self._ed_shapefile, self._browse_shapefile
+        ))
+
+        self._ed_shx = QLineEdit()
+        self._ed_shx.setPlaceholderText("Shapefile index (.shx) — leave blank if same folder as .shp")
+        files_layout.addRow("Shapefile (.shx):", self._make_browse_row(
+            self._ed_shx, self._browse_shx
+        ))
+
+        self._ed_dbf = QLineEdit()
+        self._ed_dbf.setPlaceholderText("Shapefile attributes (.dbf) — leave blank if same folder as .shp")
+        files_layout.addRow("Shapefile (.dbf):", self._make_browse_row(
+            self._ed_dbf, self._browse_dbf
         ))
 
         self._ed_dem = QLineEdit()
@@ -107,6 +122,12 @@ class SetupScreen(QWidget):
         self._ed_import_geojson.setPlaceholderText("Existing GeoJSON report to import")
         resume_layout.addRow("Import GeoJSON:", self._make_browse_row(
             self._ed_import_geojson, self._browse_import_geojson
+        ))
+
+        self._ed_session = QLineEdit()
+        self._ed_session.setPlaceholderText("Existing session file to resume (.session.json)")
+        resume_layout.addRow("Resume session:", self._make_browse_row(
+            self._ed_session, self._browse_session
         ))
 
         outer.addWidget(resume_box)
@@ -154,12 +175,21 @@ class SetupScreen(QWidget):
         d = QFileDialog.getExistingDirectory(self, "Select image folder")
         if d:
             self._ed_image_dir.setText(d)
-            self._autodetect_from_dir(Path(d))
 
     def _browse_shapefile(self):
         f, _ = QFileDialog.getOpenFileName(self, "Select shapefile", filter="Shapefiles (*.shp)")
         if f:
             self._ed_shapefile.setText(f)
+
+    def _browse_shx(self):
+        f, _ = QFileDialog.getOpenFileName(self, "Select .shx file", filter="Shapefile index (*.shx)")
+        if f:
+            self._ed_shx.setText(f)
+
+    def _browse_dbf(self):
+        f, _ = QFileDialog.getOpenFileName(self, "Select .dbf file", filter="Shapefile attributes (*.dbf)")
+        if f:
+            self._ed_dbf.setText(f)
 
     def _browse_dem(self):
         f, _ = QFileDialog.getOpenFileName(self, "Select DEM", filter="GeoTIFF (*.tif *.tiff)")
@@ -185,6 +215,11 @@ class SetupScreen(QWidget):
         if f:
             self._ed_import_geojson.setText(f)
 
+    def _browse_session(self):
+        f, _ = QFileDialog.getOpenFileName(self, "Select session file", filter="Session (*.session.json *.json)")
+        if f:
+            self._ed_session.setText(f)
+
     # ------------------------------------------------------------------
     # Auto-detect
     # ------------------------------------------------------------------
@@ -197,12 +232,41 @@ class SetupScreen(QWidget):
         self._autodetect_from_dir(Path(d))
 
     def _autodetect_from_dir(self, folder: Path):
-        # Search folder and parent for common files
         search_dirs = [folder, folder.parent]
         for sd in search_dirs:
+            # Shapefile + sidecars
             shps = list(sd.glob("*.shp"))
             if shps and not self._ed_shapefile.text():
-                self._ed_shapefile.setText(str(shps[0]))
+                shp = shps[0]
+                self._ed_shapefile.setText(str(shp))
+                # Auto-fill .shx and .dbf if found (may be same or different dir)
+                for ext, ed in ((".shx", self._ed_shx), (".dbf", self._ed_dbf)):
+                    if not ed.text():
+                        sidecar = shp.with_suffix(ext)
+                        if sidecar.exists():
+                            ed.setText(str(sidecar))
+                        else:
+                            # Search both dirs for matching stem
+                            for ssd in search_dirs:
+                                candidates = list(ssd.glob(f"*{ext}"))
+                                if candidates:
+                                    ed.setText(str(candidates[0]))
+                                    break
+
+            # Fill .shx / .dbf independently if shp was already set
+            if self._ed_shapefile.text():
+                shp = Path(self._ed_shapefile.text())
+                for ext, ed in ((".shx", self._ed_shx), (".dbf", self._ed_dbf)):
+                    if not ed.text():
+                        sidecar = shp.with_suffix(ext)
+                        if sidecar.exists():
+                            ed.setText(str(sidecar))
+                        else:
+                            for ssd in search_dirs:
+                                candidates = list(ssd.glob(f"*{ext}"))
+                                if candidates:
+                                    ed.setText(str(candidates[0]))
+                                    break
 
             tifs = list(sd.glob("*.tif")) + list(sd.glob("*.tiff"))
             tifs = [t for t in tifs if "dem" in t.name.lower() or "DEM" in t.name]
@@ -230,12 +294,21 @@ class SetupScreen(QWidget):
         cameras_xml = Path(self._ed_cameras.text().strip())
         output_path = Path(self._ed_output.text().strip())
 
+        shx_text = self._ed_shx.text().strip()
+        dbf_text = self._ed_dbf.text().strip()
+        shx_path = Path(shx_text) if shx_text else None
+        dbf_path = Path(dbf_text) if dbf_text else None
+
         # Validate
         errors = []
         if not image_dir.is_dir():
             errors.append("Image folder not found.")
         if not shapefile.is_file():
             errors.append("Shapefile not found.")
+        if shx_path and not shx_path.is_file():
+            errors.append(".shx file not found.")
+        if dbf_path and not dbf_path.is_file():
+            errors.append(".dbf file not found.")
         if not dem_path.is_file():
             errors.append("DEM file not found.")
         if not cameras_xml.is_file():
@@ -253,6 +326,26 @@ class SetupScreen(QWidget):
 
         drone_model = "M4T" if self._rb_m4t.isChecked() else "M3T"
 
+        # If .shx/.dbf are in a different folder, copy all sidecar files to a temp dir
+        # alongside a copy of the .shp so geopandas can find them.
+        self._shp_tempdir = None
+        needs_copy = (shx_path and shx_path.parent != shapefile.parent) or \
+                     (dbf_path and dbf_path.parent != shapefile.parent)
+        if needs_copy:
+            self._shp_tempdir = tempfile.mkdtemp()
+            tmp = Path(self._shp_tempdir)
+            shutil.copy2(shapefile, tmp / shapefile.name)
+            src_shx = shx_path or shapefile.with_suffix(".shx")
+            src_dbf = dbf_path or shapefile.with_suffix(".dbf")
+            if src_shx.exists():
+                shutil.copy2(src_shx, tmp / (shapefile.stem + ".shx"))
+            if src_dbf.exists():
+                shutil.copy2(src_dbf, tmp / (shapefile.stem + ".dbf"))
+            prj = shapefile.with_suffix(".prj")
+            if prj.exists():
+                shutil.copy2(prj, tmp / prj.name)
+            shapefile = tmp / shapefile.name
+
         try:
             project = load_project(image_dir, shapefile, dem_path, cameras_xml, output_path,
                                    drone_model=drone_model)
@@ -262,15 +355,14 @@ class SetupScreen(QWidget):
             self._btn_start.setEnabled(True)
             return
 
-        # Auto-resume session if one exists for this project, otherwise
-        # fall back to a manually imported GeoJSON (if provided).
+        # Determine session/import to resume — explicit user selection takes priority.
         session_path = None
-        if project.session_file.is_file():
-            session_path = ("session", project.session_file)
-        else:
-            import_text = self._ed_import_geojson.text().strip()
-            if import_text and Path(import_text).is_file():
-                session_path = ("geojson", Path(import_text))
+        session_text = self._ed_session.text().strip()
+        import_text = self._ed_import_geojson.text().strip()
+        if session_text and Path(session_text).is_file():
+            session_path = ("session", Path(session_text))
+        elif import_text and Path(import_text).is_file():
+            session_path = ("geojson", Path(import_text))
 
         self._btn_start.setText("Start Annotation →")
         self._btn_start.setEnabled(True)

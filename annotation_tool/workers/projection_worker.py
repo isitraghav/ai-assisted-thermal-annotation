@@ -27,10 +27,20 @@ class ProjectionWorker(QThread):
     def run(self):
         stem = self._image_path.stem
         try:
-            # Check disk/memory cache first
             cached = self._cache.get(stem)
             if cached is not None:
                 pixel_dict, delta_t_dict = cached
+                if not delta_t_dict and pixel_dict:
+                    try:
+                        from annotation_tool.data.projection_cache import _compute_delta_t
+                        _compute_delta_t(
+                            self._image_path, pixel_dict, delta_t_dict,
+                            getattr(self._cache._project, "drone_model", "M3T"),
+                        )
+                        if delta_t_dict:
+                            self._cache.put(stem, pixel_dict, delta_t_dict)
+                    except Exception as e:
+                        print(f"delta_t retry failed for {stem}: {e}")
             else:
                 pixel_dict, delta_t_dict = self._cache.compute(self._image_path)
                 self._cache.put(stem, pixel_dict, delta_t_dict)

@@ -15,34 +15,36 @@ import rasterio
 
 
 ANOMALY_TYPES = [
-    "Bypass Diode",
+    "None",
     "Cell",
-    "Dust",
-    "Module Missing",
-    "Module Offline",
     "Multi Cell",
+    "Bypass Diode",
+    "Module Offline",
+    "Module Missing",
     "Partial String Offline",
     "Physical Damage",
     "Shading",
     "Short Circuit",
     "String Offline",
     "Vegetation",
+    "Dust",
 ]
 
 # Maps number/letter keys to anomaly type
 KEY_TO_ANOMALY: dict[str, str] = {
-    "1": "Bypass Diode",
-    "2": "Cell",
-    "3": "Dust",
-    "4": "Module Missing",
-    "5": "Module Offline",
-    "6": "Multi Cell",
-    "7": "Partial String Offline",
-    "8": "Physical Damage",
-    "9": "Shading",
+    "1": "Cell",
+    "2": "Multi Cell",
+    "3": "Bypass Diode",
+    "4": "Module Offline",
+    "5": "Module Missing",
+    "6": "Partial String Offline",
+    "7": "Physical Damage",
+    "8": "Shading",
+    "9": "Short Circuit",
     "0": "String Offline",
     "s": "Short Circuit",
     "v": "Vegetation",
+    "d": "Dust",
 }
 
 

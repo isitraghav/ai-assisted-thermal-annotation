@@ -47,6 +47,10 @@ DRONE_RESOLUTIONS: dict[str, tuple[int, int]] = {
 }
 
 
+class _DirpResolution(ctypes.Structure):
+    _fields_ = [("width", ctypes.c_int), ("height", ctypes.c_int)]
+
+
 def get_thermal_array(rjpeg_path, drone_model: str = "M3T"):
     if libdirp is None:
         raise RuntimeError("DJI Thermal SDK not loaded")
@@ -61,7 +65,15 @@ def get_thermal_array(rjpeg_path, drone_model: str = "M3T"):
     if ret != 0:
         raise ValueError(f"Failed to decode RJPEG (error {ret}): {rjpeg_path}")
 
-    w, h = DRONE_RESOLUTIONS.get(drone_model, (640, 512))
+    # Query actual resolution from SDK — avoids SIZE_NOT_MATCH (-8) on unexpected sensors
+    res = _DirpResolution()
+    ret_res = libdirp.dirp_get_rjpeg_resolution(ph, ctypes.byref(res))
+    if ret_res == 0 and res.width > 0 and res.height > 0:
+        w, h = res.width, res.height
+    else:
+        # Fallback to known drone resolution
+        w, h = DRONE_RESOLUTIONS.get(drone_model, (640, 512))
+
     img_buf = (ctypes.c_int16 * (w * h))()
 
     ret2 = libdirp.dirp_measure(ph, img_buf, ctypes.sizeof(img_buf))

@@ -9,6 +9,7 @@ from PyQt5.QtCore import Qt, QSize, pyqtSignal, QThread, QMutex
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QAbstractItemView,
 )
 
 PANEL_W   = 200
@@ -63,6 +64,14 @@ class ThumbnailLoader(QThread):
                 pass
 
 
+class _SmoothList(QListWidget):
+    def wheelEvent(self, event):
+        d = event.angleDelta().y()
+        self.verticalScrollBar().setValue(
+            self.verticalScrollBar().value() - d // 3
+        )
+
+
 class _ImageItemWidget(QWidget):
     """Single list item: filename label on top, thumbnail below."""
 
@@ -83,12 +92,14 @@ class _ImageItemWidget(QWidget):
         self._thumb_lbl.setAlignment(Qt.AlignCenter)
         self._thumb_lbl.setFixedSize(THUMB_W, THUMB_H)
         self._thumb_lbl.setStyleSheet("background: #1a1a1a;")
+        self._raw_px: QPixmap | None = None
         layout.addWidget(self._thumb_lbl)
 
     def set_pixmap(self, px: QPixmap):
-        self._thumb_lbl.setPixmap(
-            px.scaled(THUMB_W, THUMB_H, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        )
+        self._raw_px = px
+        w = self._thumb_lbl.width() or THUMB_W
+        h = self._thumb_lbl.height() or THUMB_H
+        self._thumb_lbl.setPixmap(px.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def set_count(self, count: int):
         if count:
@@ -104,7 +115,7 @@ class ImageListPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(PANEL_W)
+        self.setMinimumWidth(150)
         self._image_paths: list[Path] = []
         self._annotation_counts: dict[int, int] = {}
         self._item_widgets: list[_ImageItemWidget] = []
@@ -118,9 +129,10 @@ class ImageListPanel(QWidget):
         header.setStyleSheet("font-weight: bold; padding: 4px; background: #2a2a2a;")
         layout.addWidget(header)
 
-        self._list = QListWidget()
+        self._list = _SmoothList()
         self._list.setSpacing(2)
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self._list.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self._list)
 
@@ -166,6 +178,24 @@ class ImageListPanel(QWidget):
     def _on_thumbnail_ready(self, idx: int, px: QPixmap):
         if 0 <= idx < len(self._item_widgets):
             self._item_widgets[idx].set_pixmap(px)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._relayout_items()
+
+    def _relayout_items(self):
+        w = max(80, self.width() - 10)
+        h = int(w * THUMB_H / THUMB_W)
+        item_h = h + 22
+        for i, widget in enumerate(self._item_widgets):
+            widget._thumb_lbl.setFixedSize(w, h)
+            if widget._raw_px and not widget._raw_px.isNull():
+                widget._thumb_lbl.setPixmap(
+                    widget._raw_px.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
+            item = self._list.item(i)
+            if item:
+                item.setSizeHint(QSize(w + 10, item_h))
 
     def closeEvent(self, event):
         self._loader.stop()

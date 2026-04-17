@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from annotation_tool.data.project import ProjectState, exported_image_name
@@ -24,19 +25,22 @@ def _split_subpolygons(coords: list) -> list[list[tuple[float, float]]]:
     return polys or []
 
 
-def _unique_path(out_dir: Path, name: str) -> Path:
-    """Return a path that doesn't collide with existing files."""
-    p = out_dir / name
-    if not p.exists():
-        return p
-    stem, ext = name.rsplit(".", 1) if "." in name else (name, "jpg")
-    counter = 1
-    while p.exists():
-        p = out_dir / f"{stem}_{counter}.{ext}"
-        counter += 1
-    return p
 
 
+def _cleanup_orphaned_images(out_dir: Path, valid_names: set[str]):
+    deleted_dir = out_dir.parent / "deleted_markings"
+    deleted_dir.mkdir(parents=True, exist_ok=True)
+    for f in out_dir.glob("*.jpg"):
+        if f.name not in valid_names:
+            dest = deleted_dir / f.name
+            # avoid collision in deleted_markings
+            if dest.exists():
+                stem, ext = f.stem, f.suffix
+                counter = 1
+                while dest.exists():
+                    dest = deleted_dir / f"{stem}_{counter}{ext}"
+                    counter += 1
+            shutil.move(str(f), dest)
 
 
 def export_annotated_images(project: ProjectState, cache) -> int:
@@ -55,6 +59,12 @@ def export_annotated_images(project: ProjectState, cache) -> int:
     for rec in project.annotations.values():
         if rec.image_name:
             by_image.setdefault(rec.image_name, []).append(rec)
+
+    # Build set of filenames that SHOULD exist after this export
+    valid_names: set[str] = set()
+    for rec in project.annotations.values():
+        if rec.pixel_coords:
+            valid_names.add(exported_image_name(rec))
 
     exported = 0
     for image_name, recs in by_image.items():
@@ -75,7 +85,7 @@ def export_annotated_images(project: ProjectState, cache) -> int:
             continue
 
         for rec in recs:
-            coords = pixel_dict.get(rec.shp_index)
+            coords = rec.pixel_coords if rec.pixel_coords else pixel_dict.get(rec.shp_index)
             if not coords:
                 continue
 
@@ -95,7 +105,8 @@ def export_annotated_images(project: ProjectState, cache) -> int:
                 )
 
             composited = Image.alpha_composite(base_img.convert("RGBA"), overlay).convert("RGB")
-            composited.save(_unique_path(out_dir, exported_image_name(rec)))
+            composited.save(out_dir / exported_image_name(rec))
             exported += 1
 
+    _cleanup_orphaned_images(out_dir, valid_names)
     return exported

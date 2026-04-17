@@ -9,23 +9,36 @@ from typing import Optional
 from annotation_tool.data.project import ANOMALY_TYPES, AnnotationRecord
 
 _CLASSES = [
-    "bypass_diode",
     "cell",
-    "dust",
-    "module_missing",
-    "module_offline",
     "multi_cell",
+    "bypass_diode",
+    "module_offline",
+    "module_missing",
     "partial_string_offline",
     "physical_damage",
     "shading",
     "short_circuit",
     "string_offline",
     "vegetation",
+    "dust",
 ]
 
-_CLASS_TO_IDX: dict[str, int] = {
-    anomaly: idx for idx, anomaly in enumerate(ANOMALY_TYPES)
+_ANOMALY_TO_CLASS_IDX: dict[str, int] = {
+    "Cell": 0,
+    "Multi Cell": 1,
+    "Bypass Diode": 2,
+    "Module Offline": 3,
+    "Module Missing": 4,
+    "Partial String Offline": 5,
+    "Physical Damage": 6,
+    "Shading": 7,
+    "Short Circuit": 8,
+    "String Offline": 9,
+    "Vegetation": 10,
+    "Dust": 11,
 }
+
+_CLASS_TO_IDX = _ANOMALY_TO_CLASS_IDX
 
 
 class TrainingExporter:
@@ -75,6 +88,8 @@ class TrainingExporter:
             lines: list[str] = []
             for rec in recs:
                 if not rec.pixel_coords:
+                    continue
+                if rec.anomaly == "None":
                     continue
                 class_idx = self.CLASS_TO_IDX.get(rec.anomaly)
                 if class_idx is None:

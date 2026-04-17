@@ -126,6 +126,18 @@ class AnnotationPanel(QWidget):
             return True
         return False
 
+    @property
+    def selected_shp_index(self) -> int | None:
+        return self._shp_index
+
+    def update_delta_t(self, val: float | None):
+        """Update delta_t when projection result arrives late."""
+        if val is not None and not self._ed_delta_t.text().strip():
+            self._delta_t_auto = val
+            self._ed_delta_t.blockSignals(True)
+            self._ed_delta_t.setText(f"{val:.2f}")
+            self._ed_delta_t.blockSignals(False)
+
     def trigger_save(self):
         """Programmatically trigger save (e.g. after key-press)."""
         if self._shp_index is not None:
@@ -166,17 +178,10 @@ class AnnotationPanel(QWidget):
         info_layout.addRow("Panel #:", self._lbl_panel_id)
         outer.addWidget(info_box)
 
-        # Auto-extracted info
-        auto_box = QGroupBox("Auto-extracted")
-        auto_layout = QFormLayout(auto_box)
-        auto_layout.setSpacing(3)
+        # Hidden labels kept for API compatibility (not shown)
         self._lbl_date = QLabel("—")
         self._lbl_time = QLabel("—")
         self._lbl_delta_t = QLabel("—")
-        auto_layout.addRow("Date:", self._lbl_date)
-        auto_layout.addRow("Time:", self._lbl_time)
-        auto_layout.addRow("ΔT:", self._lbl_delta_t)
-        outer.addWidget(auto_box)
 
         # Editable properties
         props_box = QGroupBox("Properties")
@@ -197,11 +202,9 @@ class AnnotationPanel(QWidget):
 
         self._ed_row = QLineEdit()
         self._ed_row.setPlaceholderText("e.g. 1")
-        props_layout.addRow("row:", self._ed_row)
 
         self._ed_col = QLineEdit()
         self._ed_col.setPlaceholderText("e.g. 1")
-        props_layout.addRow("col:", self._ed_col)
 
         self._anomaly_group = QButtonGroup(self)
         self._anomaly_group.setExclusive(True)
@@ -250,12 +253,13 @@ class AnnotationPanel(QWidget):
         # Keyboard hint
         hint_lines = [
             "Shortcuts:",
-            "1=Bypass Diode  2=Cell",
-            "3=Dust          4=Mod.Missing",
-            "5=Mod.Offline   6=Multi Cell",
-            "7=Part.String   8=Phys.Damage",
-            "9=Shading       0=Str.Offline",
+            "1=Cell          2=Multi Cell",
+            "3=Bypass Diode  4=Mod.Offline",
+            "5=Mod.Missing   6=Part.String",
+            "7=Phys.Damage   8=Shading",
+            "9=Short Circuit 0=Str.Offline",
             "S=Short Circuit V=Vegetation",
+            "D=Dust",
             "←/→/A/D/N/M prev/next image",
             "Ctrl+Z undo  Ctrl+Y redo",
             "F = fit to window",

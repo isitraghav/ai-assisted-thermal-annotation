@@ -13,6 +13,7 @@ from annotation_tool.data.project import AnnotationRecord, ProjectState
 from annotation_tool.data.geojson_writer import GeoJSONWriter
 from annotation_tool.data.image_exporter import export_annotated_images
 from annotation_tool.data.training_exporter import TrainingExporter
+from annotation_tool.data.csv_exporter import export_csv
 
 MAX_UNDO = 500
 
@@ -110,6 +111,8 @@ class SessionManager(QObject):
             )
             self._save_session_json()
             n_img = export_annotated_images(self._project, self._cache)
+            csv_path = self._project.output_geojson.with_suffix(".csv")
+            export_csv(self._project.annotations, csv_path)
             try:
                 self._training_exporter.export(
                     self._project.annotations,
@@ -122,6 +125,7 @@ class SessionManager(QObject):
             self.saved.emit(
                 f"Saved {n} annotation(s) → {self._project.output_geojson.name}"
                 + (f"  |  {n_img} image(s) exported" if n_img else "")
+                + f"  |  CSV: {csv_path.name}"
             )
         except Exception as e:
             self.saved.emit(f"Save failed: {e}")

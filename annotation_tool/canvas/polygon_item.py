@@ -197,6 +197,34 @@ class PolygonItem(QGraphicsPolygonItem):
             super().paint(painter, option, widget)
 
     # ------------------------------------------------------------------
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        offset = self.pos()
+        if offset.x() != 0.0 or offset.y() != 0.0:
+            # Absorb the drag offset into _pixel_coords so scene coords stay correct
+            new_coords = []
+            for pt in self._pixel_coords:
+                if pt is None:
+                    new_coords.append(None)
+                else:
+                    new_coords.append([pt[0] + offset.x(), pt[1] + offset.y()])
+            self._pixel_coords = new_coords
+            # Rebuild polygon in local space at origin
+            new_poly = QPolygonF([
+                QPointF(pt[0], pt[1]) for pt in new_coords if pt is not None
+            ])
+            self.setPolygon(new_poly)
+            self.setPos(0, 0)
+            # Re-sync handle positions
+            for i, handle in enumerate(self._handles):
+                if i < new_poly.count():
+                    handle.setPos(new_poly.at(i))
+            # Notify screen
+            if self.scene() and self.scene().views():
+                view = self.scene().views()[0]
+                if hasattr(view, 'polygon_modified'):
+                    view.polygon_modified.emit(self._shp_index, self._pixel_coords)
+
     def hoverEnterEvent(self, event):
         if not self._selected:
             pen = self.pen()
@@ -231,3 +259,7 @@ class PolygonVertex(QGraphicsEllipseItem):
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
         self._polygon.notify_vertex_changed()
+        # Re-sync handle visual position after drag
+        poly = self._polygon.polygon()
+        if self._index < poly.count():
+            self.setPos(poly.at(self._index))
