@@ -30,15 +30,18 @@ class ProjectionWorker(QThread):
             cached = self._cache.get(stem)
             if cached is not None:
                 pixel_dict, delta_t_dict = cached
-                if not delta_t_dict and pixel_dict:
+                # Retry any panels missing from delta_t_dict (handles partial failures)
+                missing = {
+                    idx: c for idx, c in pixel_dict.items() if idx not in delta_t_dict
+                }
+                if missing:
                     try:
                         from annotation_tool.data.projection_cache import _compute_delta_t
                         _compute_delta_t(
-                            self._image_path, pixel_dict, delta_t_dict,
+                            self._image_path, missing, delta_t_dict,
                             getattr(self._cache._project, "drone_model", "M3T"),
                         )
-                        if delta_t_dict:
-                            self._cache.put(stem, pixel_dict, delta_t_dict)
+                        self._cache.put(stem, pixel_dict, delta_t_dict)
                     except Exception as e:
                         print(f"delta_t retry failed for {stem}: {e}")
             else:

@@ -200,7 +200,7 @@ class PolygonItem(QGraphicsPolygonItem):
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
         offset = self.pos()
-        if offset.x() != 0.0 or offset.y() != 0.0:
+        if abs(offset.x()) > 0.5 or abs(offset.y()) > 0.5:
             # Absorb the drag offset into _pixel_coords so scene coords stay correct
             new_coords = []
             for pt in self._pixel_coords:

@@ -37,10 +37,20 @@ class SessionManager(QObject):
         self._redo_stack: list[HistoryEntry] = []
         self._dirty = False
 
-        self._autosave_timer = QTimer(self)
-        self._autosave_timer.setSingleShot(True)
-        self._autosave_timer.setInterval(500)
-        self._autosave_timer.timeout.connect(self.save)
+        # Fast save: JSON + CSV only (500 ms debounce)
+        self._fast_save_timer = QTimer(self)
+        self._fast_save_timer.setSingleShot(True)
+        self._fast_save_timer.setInterval(500)
+        self._fast_save_timer.timeout.connect(self._fast_save)
+
+        # Slow save: image export + training (5 s debounce)
+        self._slow_save_timer = QTimer(self)
+        self._slow_save_timer.setSingleShot(True)
+        self._slow_save_timer.setInterval(5000)
+        self._slow_save_timer.timeout.connect(self._slow_save)
+
+        # Track which annotations changed since last image export
+        self._image_dirty_indices: set[int] = set()
 
         training_dir = project.output_geojson.parent / "training_dataset"
         self._training_exporter = TrainingExporter(training_dir)
@@ -64,6 +74,7 @@ class SessionManager(QObject):
         self._redo_stack.clear()
         if len(self._undo_stack) > MAX_UNDO:
             self._undo_stack.pop(0)
+        self._image_dirty_indices.add(entry.shp_index)
         self.mark_dirty()
         self.changed.emit()
 
@@ -77,6 +88,7 @@ class SessionManager(QObject):
             self._project.annotations.pop(entry.shp_index, None)
         else:
             self._project.annotations[entry.shp_index] = entry.before
+        self._image_dirty_indices.add(entry.shp_index)
         self.mark_dirty()
         self.changed.emit()
         return entry
@@ -91,6 +103,7 @@ class SessionManager(QObject):
             self._project.annotations.pop(entry.shp_index, None)
         else:
             self._project.annotations[entry.shp_index] = entry.after
+        self._image_dirty_indices.add(entry.shp_index)
         self.mark_dirty()
         self.changed.emit()
         return entry
@@ -102,7 +115,14 @@ class SessionManager(QObject):
         return bool(self._redo_stack)
 
     def save(self):
-        """Force save GeoJSON + session file + annotated images."""
+        """Force full save (metadata + images). Called manually or on shutdown."""
+        self._fast_save_timer.stop()
+        self._slow_save_timer.stop()
+        self._fast_save()
+        self._slow_save()
+
+    def _fast_save(self):
+        """Save GeoJSON + session JSON + CSV only (no image I/O)."""
         try:
             GeoJSONWriter.write(
                 self._project.annotations,
@@ -110,9 +130,24 @@ class SessionManager(QObject):
                 self._project.output_geojson,
             )
             self._save_session_json()
-            n_img = export_annotated_images(self._project, self._cache)
             csv_path = self._project.output_geojson.with_suffix(".csv")
             export_csv(self._project.annotations, csv_path)
+            self._dirty = False
+            n = len(self._project.annotations)
+            self.saved.emit(
+                f"Saved {n} annotation(s) → {self._project.output_geojson.name}"
+                + f"  |  CSV: {csv_path.name}"
+            )
+        except Exception as e:
+            self.saved.emit(f"Save failed: {e}")
+
+    def _slow_save(self):
+        """Export annotated images + training dataset (runs on 5 s debounce)."""
+        try:
+            n_img = export_annotated_images(
+                self._project, self._cache, self._image_dirty_indices
+            )
+            self._image_dirty_indices.clear()
             try:
                 self._training_exporter.export(
                     self._project.annotations,
@@ -120,15 +155,10 @@ class SessionManager(QObject):
                 )
             except Exception as te:
                 print(f"Training export warning: {te}")
-            self._dirty = False
-            n = len(self._project.annotations)
-            self.saved.emit(
-                f"Saved {n} annotation(s) → {self._project.output_geojson.name}"
-                + (f"  |  {n_img} image(s) exported" if n_img else "")
-                + f"  |  CSV: {csv_path.name}"
-            )
+            if n_img:
+                self.saved.emit(f"{n_img} image(s) exported to annotated_images/")
         except Exception as e:
-            self.saved.emit(f"Save failed: {e}")
+            print(f"Image export error: {e}")
 
     def load_session(self, session_path: Path) -> bool:
         """Restore annotations from a session .json file. Returns True on success."""
@@ -233,7 +263,8 @@ class SessionManager(QObject):
 
     def mark_dirty(self):
         self._dirty = True
-        self._autosave_timer.start()
+        self._fast_save_timer.start()
+        self._slow_save_timer.start()
 
     def _save_session_json(self):
         data = {

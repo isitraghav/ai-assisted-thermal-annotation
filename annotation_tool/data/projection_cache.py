@@ -160,30 +160,33 @@ def _compute_delta_t(image_path: Path, pixel_dict: dict, delta_t_dict: dict,
     thermal = get_thermal_array(str(image_path), drone_model)
     H, W = thermal.shape
 
-    from PIL import Image, ImageDraw
     import numpy as np
+    from PIL import Image, ImageDraw
 
     for shp_idx, coords in pixel_dict.items():
-        # Build mask for this panel
-        img_mask = Image.new("L", (W, H), 0)
-        draw = ImageDraw.Draw(img_mask)
-        # Filter out None sentinels and draw each sub-polygon
-        sub_pts = []
-        for pt in coords:
-            if pt is None:
-                if len(sub_pts) >= 3:
-                    draw.polygon(sub_pts, fill=255)
-                sub_pts = []
-            else:
-                sub_pts.append((int(round(pt[0])), int(round(pt[1]))))
-        if len(sub_pts) >= 3:
-            draw.polygon(sub_pts, fill=255)
+        try:
+            # Fresh mask per panel (PIL fromarray can share memory with source array)
+            img_mask = Image.new("L", (W, H), 0)
+            draw = ImageDraw.Draw(img_mask)
+            sub_pts: list[tuple[int, int]] = []
+            for pt in coords:
+                if pt is None:
+                    if len(sub_pts) >= 3:
+                        draw.polygon(sub_pts, fill=255)
+                    sub_pts = []
+                else:
+                    sub_pts.append((int(round(pt[0])), int(round(pt[1]))))
+            if len(sub_pts) >= 3:
+                draw.polygon(sub_pts, fill=255)
 
-        mask_arr = np.array(img_mask, dtype=bool)
-        if not mask_arr.any():
+            mask_arr = np.frombuffer(img_mask.tobytes(), dtype=np.uint8).reshape(H, W).view(bool)
+            if not mask_arr.any():
+                continue
+
+            panel_temps = thermal[mask_arr]
+            delta_t_dict[shp_idx] = round(
+                float(panel_temps.max()) - float(panel_temps.min()), 2
+            )
+        except Exception as e:
+            print(f"  delta_t panel {shp_idx} failed: {e}")
             continue
-
-        panel_temps = thermal[mask_arr]
-
-        delta_t = float(panel_temps.max()) - float(panel_temps.min())
-        delta_t_dict[shp_idx] = round(delta_t, 2)

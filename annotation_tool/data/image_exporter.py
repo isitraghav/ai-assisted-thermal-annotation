@@ -43,8 +43,15 @@ def _cleanup_orphaned_images(out_dir: Path, valid_names: set[str]):
             shutil.move(str(f), dest)
 
 
-def export_annotated_images(project: ProjectState, cache) -> int:
+def export_annotated_images(
+    project: ProjectState,
+    cache,
+    dirty_indices: set[int] | None = None,
+) -> int:
     """Export one full image per annotated panel, highlighting that panel only.
+
+    If dirty_indices is provided, only re-exports panels whose shp_index is in
+    the set (skips unchanged panels).
 
     Output: annotated_images/<stem>_<rack>_<panel>_<anomaly>.jpg
     Returns number of files written.
@@ -54,13 +61,14 @@ def export_annotated_images(project: ProjectState, cache) -> int:
     out_dir = project.output_geojson.parent / "annotated_images"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Group annotations by image filename
+    # Group annotations by image filename — only include dirty panels
     by_image: dict[str, list] = {}
     for rec in project.annotations.values():
         if rec.image_name:
-            by_image.setdefault(rec.image_name, []).append(rec)
+            if dirty_indices is None or rec.shp_index in dirty_indices:
+                by_image.setdefault(rec.image_name, []).append(rec)
 
-    # Build set of filenames that SHOULD exist after this export
+    # Build set of filenames that SHOULD exist (all annotations, not just dirty)
     valid_names: set[str] = set()
     for rec in project.annotations.values():
         if rec.pixel_coords:

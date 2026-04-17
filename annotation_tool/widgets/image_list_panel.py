@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
+import concurrent.futures
+
 from PyQt5.QtCore import Qt, QSize, pyqtSignal, QThread, QMutex
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtWidgets import (
@@ -18,8 +20,21 @@ THUMB_H   = 152   # 190 * 512/640 — maintains thermal 5:4 aspect ratio
 ITEM_H    = THUMB_H + 22   # thumb + name label + spacing
 
 
+def _load_thumb(idx: int, path: Path) -> tuple[int, bytes] | None:
+    """Load thumbnail in worker thread; returns (idx, png_bytes) or None."""
+    try:
+        from PIL import Image
+        pil = Image.open(path).convert("RGB")
+        pil.thumbnail((THUMB_W, THUMB_H), Image.LANCZOS)
+        buf = io.BytesIO()
+        pil.save(buf, format="PNG")
+        return idx, buf.getvalue()
+    except Exception:
+        return None
+
+
 class ThumbnailLoader(QThread):
-    """Background thread that loads image thumbnails and emits them."""
+    """Background thread pool that loads image thumbnails and emits them."""
 
     thumbnail_ready = pyqtSignal(int, QPixmap)
 
@@ -38,30 +53,29 @@ class ThumbnailLoader(QThread):
         self._running = False
 
     def run(self):
-        from PIL import Image
-
-        while self._running:
-            self._mutex.lock()
-            if self._queue:
-                idx, path = self._queue.pop(0)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures: dict[concurrent.futures.Future, None] = {}
+            while self._running:
+                self._mutex.lock()
+                batch, self._queue = self._queue[:], []
                 self._mutex.unlock()
-            else:
-                self._mutex.unlock()
-                self.msleep(50)
-                continue
-
-            try:
-                pil = Image.open(path).convert("RGB")
-                pil.thumbnail((THUMB_W, THUMB_H), Image.LANCZOS)
-                buf = io.BytesIO()
-                pil.save(buf, format="PNG")
-                buf.seek(0)
-                qimg = QImage()
-                qimg.loadFromData(buf.read(), "PNG")
-                px = QPixmap.fromImage(qimg)
-                self.thumbnail_ready.emit(idx, px)
-            except Exception:
-                pass
+                for idx, path in batch:
+                    futures[pool.submit(_load_thumb, idx, path)] = None
+                done = [f for f in list(futures) if f.done()]
+                for f in done:
+                    del futures[f]
+                    result = f.result()
+                    if result:
+                        idx, png_bytes = result
+                        qimg = QImage()
+                        qimg.loadFromData(png_bytes, "PNG")
+                        px = QPixmap.fromImage(qimg)
+                        self.thumbnail_ready.emit(idx, px)
+                if not batch and not done:
+                    self.msleep(30)
+            # Drain remaining futures cleanly before thread exits
+            for f in futures:
+                f.cancel()
 
 
 class _SmoothList(QListWidget):
@@ -199,5 +213,5 @@ class ImageListPanel(QWidget):
 
     def closeEvent(self, event):
         self._loader.stop()
-        self._loader.wait(500)
+        self._loader.wait(2000)
         super().closeEvent(event)

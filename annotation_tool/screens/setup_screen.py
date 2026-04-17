@@ -8,13 +8,14 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QGroupBox, QFormLayout, QFileDialog,
-    QMessageBox, QFrame, QRadioButton, QButtonGroup,
+    QMessageBox, QFrame, QRadioButton, QButtonGroup, QComboBox,
 )
 
 import shutil
 import tempfile
 
 from annotation_tool.data.project import load_project, ProjectState
+from annotation_tool.data.recent_sessions import load_recent, save_recent
 
 
 class SetupScreen(QWidget):
@@ -46,6 +47,21 @@ class SetupScreen(QWidget):
         subtitle.setAlignment(Qt.AlignCenter)
         subtitle.setStyleSheet("color: #888; font-size: 13px;")
         outer.addWidget(subtitle)
+
+        # ---- Recent sessions ----
+        recent_box = QGroupBox("Recent Sessions")
+        recent_layout = QHBoxLayout(recent_box)
+        recent_layout.setSpacing(8)
+        self._recent_combo = QComboBox()
+        self._recent_combo.addItem("— select a recent session —", None)
+        for entry in load_recent():
+            self._recent_combo.addItem(entry.get("label", "?"), entry)
+        btn_load_recent = QPushButton("Load")
+        btn_load_recent.setFixedWidth(70)
+        btn_load_recent.clicked.connect(self._load_recent)
+        recent_layout.addWidget(self._recent_combo, stretch=1)
+        recent_layout.addWidget(btn_load_recent)
+        outer.addWidget(recent_box)
 
         # ---- Drone model ----
         drone_box = QGroupBox("Drone Model")
@@ -171,6 +187,24 @@ class SetupScreen(QWidget):
     # Browse callbacks
     # ------------------------------------------------------------------
 
+    def _load_recent(self):
+        entry = self._recent_combo.currentData()
+        if not entry:
+            return
+        self._ed_image_dir.setText(entry.get("image_dir", ""))
+        self._ed_shapefile.setText(entry.get("shapefile", ""))
+        self._ed_shx.setText(entry.get("shx", ""))
+        self._ed_dbf.setText(entry.get("dbf", ""))
+        self._ed_dem.setText(entry.get("dem", ""))
+        self._ed_cameras.setText(entry.get("cameras_xml", ""))
+        self._ed_output.setText(entry.get("output_geojson", ""))
+        self._ed_session.setText(entry.get("session_file", ""))
+        self._ed_import_geojson.setText("")
+        if entry.get("drone_model") == "M4T":
+            self._rb_m4t.setChecked(True)
+        else:
+            self._rb_m3t.setChecked(True)
+
     def _browse_image_dir(self):
         d = QFileDialog.getExistingDirectory(self, "Select image folder")
         if d:
@@ -279,6 +313,21 @@ class SetupScreen(QWidget):
             if xmls and not self._ed_cameras.text():
                 self._ed_cameras.setText(str(xmls[0]))
 
+            # Session file
+            sessions = list(sd.glob("*.session.json"))
+            if sessions and not self._ed_session.text():
+                self._ed_session.setText(str(sessions[0]))
+
+            # GeoJSON output / import
+            geojsons = list(sd.glob("*.geojson"))
+            if geojsons:
+                # Prefer one that looks like output (not a source shapefile export)
+                for gj in geojsons:
+                    if not self._ed_output.text():
+                        self._ed_output.setText(str(gj))
+                    elif not self._ed_import_geojson.text() and str(gj) != self._ed_output.text():
+                        self._ed_import_geojson.setText(str(gj))
+
         if not self._ed_output.text():
             self._ed_output.setText(str(folder.parent / "annotations.geojson"))
 
@@ -366,4 +415,31 @@ class SetupScreen(QWidget):
 
         self._btn_start.setText("Start Annotation →")
         self._btn_start.setEnabled(True)
+
+        # Persist to recent sessions
+        session_file_str = self._ed_session.text().strip()
+        if not session_file_str:
+            # Use derived session path if it will be created
+            session_file_str = str(project.session_file)
+        entry = {
+            "label": f"{image_dir.name} / {output_path.stem}",
+            "image_dir": str(image_dir),
+            "shapefile": self._ed_shapefile.text().strip(),
+            "shx": self._ed_shx.text().strip(),
+            "dbf": self._ed_dbf.text().strip(),
+            "dem": str(dem_path),
+            "cameras_xml": str(cameras_xml),
+            "output_geojson": str(output_path),
+            "session_file": session_file_str,
+            "drone_model": drone_model,
+        }
+        save_recent(entry)
+        # Refresh combo so this session appears at top
+        self._recent_combo.blockSignals(True)
+        self._recent_combo.clear()
+        self._recent_combo.addItem("— select a recent session —", None)
+        for e in load_recent():
+            self._recent_combo.addItem(e.get("label", "?"), e)
+        self._recent_combo.blockSignals(False)
+
         self.setup_complete.emit(project, session_path)

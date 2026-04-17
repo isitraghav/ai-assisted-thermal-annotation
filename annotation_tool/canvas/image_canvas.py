@@ -297,8 +297,29 @@ class ImageCanvas(QGraphicsView):
             self._loading_text = None
 
 
+_pixmap_cache: dict[str, QPixmap] = {}  # stem → QPixmap, max 3 entries
+_pixmap_order: list[str] = []
+
+
 def _load_pixmap(image_path: Path) -> QPixmap:
-    """Load a JPEG (including DJI RJPEG) as QPixmap via PIL to avoid Qt codec issues."""
+    """Load a JPEG (including DJI RJPEG) as QPixmap via PIL; LRU-cached (3 entries)."""
+    key = str(image_path)
+    if key in _pixmap_cache:
+        _pixmap_order.remove(key)
+        _pixmap_order.append(key)
+        return _pixmap_cache[key]
+
+    px = _decode_pixmap(image_path)
+
+    _pixmap_cache[key] = px
+    _pixmap_order.append(key)
+    while len(_pixmap_order) > 3:
+        evict = _pixmap_order.pop(0)
+        _pixmap_cache.pop(evict, None)
+    return px
+
+
+def _decode_pixmap(image_path: Path) -> QPixmap:
     try:
         from PIL import Image
         import io as _io
@@ -313,12 +334,10 @@ def _load_pixmap(image_path: Path) -> QPixmap:
     except Exception:
         pass
 
-    # Fallback 1: direct Qt load
     qimg = QImage(str(image_path))
     if not qimg.isNull():
         return QPixmap.fromImage(qimg)
 
-    # Fallback 2: error placeholder (dark red)
     placeholder = QPixmap(640, 480)
     placeholder.fill(QColor(80, 20, 20))
     return placeholder

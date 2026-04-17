@@ -59,6 +59,7 @@ class TrainingExporter:
         self._dir = training_dir
         self._images_dir = training_dir / "images" / "train"
         self._labels_dir = training_dir / "labels" / "train"
+        self._size_cache: dict[str, tuple[int, int]] = {}
 
     def export(
         self,
@@ -80,9 +81,7 @@ class TrainingExporter:
             if src_path and src_path.exists() and not dst_img.exists():
                 shutil.copy2(src_path, dst_img)
 
-            w, h = self._get_image_size(src_path)
-            if (w is None or h is None) and dst_img.exists():
-                w, h = self._get_image_size(dst_img)
+            w, h = self._get_image_size_cached(image_name, src_path, dst_img)
 
             label_path = self._labels_dir / (Path(image_name).stem + ".txt")
             lines: list[str] = []
@@ -106,6 +105,18 @@ class TrainingExporter:
 
         self._write_dataset_yaml()
         self._write_classes_txt()
+
+    def _get_image_size_cached(
+        self, key: str, src_path: Optional[Path], dst_path: Path
+    ) -> tuple[Optional[int], Optional[int]]:
+        if key in self._size_cache:
+            return self._size_cache[key]
+        w, h = self._get_image_size(src_path)
+        if (w is None or h is None) and dst_path.exists():
+            w, h = self._get_image_size(dst_path)
+        if w is not None and h is not None:
+            self._size_cache[key] = (w, h)
+        return w, h
 
     def _get_image_size(
         self, img_path: Optional[Path]
