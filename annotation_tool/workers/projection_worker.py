@@ -9,6 +9,19 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from annotation_tool.data.projection_cache import ProjectionCache
 
 
+def _intr_wh_for_image(project, image_path: Path) -> tuple[int, int] | None:
+    model = getattr(project, "model", None)
+    if model is None:
+        return None
+    pose = model.cameras.get(image_path.stem)
+    if pose is None:
+        return None
+    intr = model.sensors.get(pose.sensor_id)
+    if intr is None:
+        return None
+    return (intr.width, intr.height)
+
+
 class ProjectionWorker(QThread):
     """Projects shapefile polygons onto a single image in a background thread.
 
@@ -37,9 +50,11 @@ class ProjectionWorker(QThread):
                 if missing:
                     try:
                         from annotation_tool.data.projection_cache import _compute_delta_t
+                        intr_wh = _intr_wh_for_image(self._cache._project, self._image_path)
                         _compute_delta_t(
                             self._image_path, missing, delta_t_dict,
                             getattr(self._cache._project, "drone_model", "M3T"),
+                            intr_wh,
                         )
                         self._cache.put(stem, pixel_dict, delta_t_dict)
                     except Exception as e:

@@ -117,7 +117,8 @@ class ProjectionCache:
         delta_t_dict: dict[int, float] = {}
         try:
             _compute_delta_t(image_path, pixel_dict, delta_t_dict,
-                             getattr(project, "drone_model", "M3T"))
+                             getattr(project, "drone_model", "M3T"),
+                             (intr.width, intr.height))
         except Exception as e:
             print(f"delta_t compute failed for {image_path.name}: {e}")
 
@@ -148,9 +149,19 @@ def _densify_ring_to_px(ring_coords, projector, dem) -> list[tuple[float, float]
     return list(zip(u.tolist(), v.tolist()))
 
 
+_DELTA_T_RES_LOGGED = False
+_EMPTY_MASK_LOGGED = False
+
+
 def _compute_delta_t(image_path: Path, pixel_dict: dict, delta_t_dict: dict,
-                     drone_model: str = "M3T"):
-    """Compute ΔT (hotspot − surroundings) for each panel using thermal array."""
+                     drone_model: str = "M3T",
+                     intr_wh: tuple[int, int] | None = None):
+    """Compute ΔT (hotspot − surroundings) for each panel using thermal array.
+
+    intr_wh: (width, height) from cameras.xml intrinsics. When provided and
+    different from the thermal array resolution, pixel coords are uniformly
+    rescaled into thermal space before rasterization.
+    """
     import sys
     ROOT = Path(__file__).parents[2]
     if str(ROOT) not in sys.path:
@@ -163,9 +174,20 @@ def _compute_delta_t(image_path: Path, pixel_dict: dict, delta_t_dict: dict,
     import numpy as np
     from PIL import Image, ImageDraw
 
+    sx, sy = 1.0, 1.0
+    if intr_wh is not None and (intr_wh[0], intr_wh[1]) != (W, H):
+        sx = W / intr_wh[0]
+        sy = H / intr_wh[1]
+
+    global _DELTA_T_RES_LOGGED
+    if not _DELTA_T_RES_LOGGED:
+        _DELTA_T_RES_LOGGED = True
+        intr_str = f"{intr_wh[0]}x{intr_wh[1]}" if intr_wh else "unknown"
+        scale_str = f"scaling by ({sx:.3f}, {sy:.3f})" if (sx, sy) != (1.0, 1.0) else "no scaling"
+        print(f"delta_t: intr {intr_str} -> thermal {W}x{H}, {scale_str} (drone={drone_model})")
+
     for shp_idx, coords in pixel_dict.items():
         try:
-            # Fresh mask per panel (PIL fromarray can share memory with source array)
             img_mask = Image.new("L", (W, H), 0)
             draw = ImageDraw.Draw(img_mask)
             sub_pts: list[tuple[int, int]] = []
@@ -175,12 +197,24 @@ def _compute_delta_t(image_path: Path, pixel_dict: dict, delta_t_dict: dict,
                         draw.polygon(sub_pts, fill=255)
                     sub_pts = []
                 else:
-                    sub_pts.append((int(round(pt[0])), int(round(pt[1]))))
+                    sub_pts.append((int(round(pt[0] * sx)), int(round(pt[1] * sy))))
             if len(sub_pts) >= 3:
                 draw.polygon(sub_pts, fill=255)
 
             mask_arr = np.frombuffer(img_mask.tobytes(), dtype=np.uint8).reshape(H, W).view(bool)
             if not mask_arr.any():
+                global _EMPTY_MASK_LOGGED
+                if not _EMPTY_MASK_LOGGED:
+                    _EMPTY_MASK_LOGGED = True
+                    us = [p[0] for p in coords if p is not None]
+                    vs = [p[1] for p in coords if p is not None]
+                    if us and vs:
+                        print(
+                            f"delta_t: empty mask for panel {shp_idx} "
+                            f"(panel bbox u={min(us):.1f}..{max(us):.1f}, "
+                            f"v={min(vs):.1f}..{max(vs):.1f}, thermal {W}x{H}, "
+                            f"scale=({sx:.3f},{sy:.3f}))"
+                        )
                 continue
 
             panel_temps = thermal[mask_arr]

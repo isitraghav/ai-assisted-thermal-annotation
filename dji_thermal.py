@@ -51,6 +51,25 @@ class _DirpResolution(ctypes.Structure):
     _fields_ = [("width", ctypes.c_int), ("height", ctypes.c_int)]
 
 
+if libdirp is not None:
+    # c_void_p for the rjpeg buffer — avoids ctypes NUL-string semantics on
+    # binary JPEG data (matters on Windows where c_char_p coercion differs).
+    libdirp.dirp_create_from_rjpeg.argtypes = [
+        ctypes.c_void_p, ctypes.c_int32, ctypes.POINTER(DIRP_HANDLE),
+    ]
+    libdirp.dirp_create_from_rjpeg.restype = ctypes.c_int32
+    libdirp.dirp_get_rjpeg_resolution.argtypes = [
+        DIRP_HANDLE, ctypes.POINTER(_DirpResolution),
+    ]
+    libdirp.dirp_get_rjpeg_resolution.restype = ctypes.c_int32
+    libdirp.dirp_measure.argtypes = [
+        DIRP_HANDLE, ctypes.c_void_p, ctypes.c_int32,
+    ]
+    libdirp.dirp_measure.restype = ctypes.c_int32
+    libdirp.dirp_destroy.argtypes = [DIRP_HANDLE]
+    libdirp.dirp_destroy.restype = ctypes.c_int32
+
+
 def get_thermal_array(rjpeg_path, drone_model: str = "M3T"):
     if libdirp is None:
         raise RuntimeError("DJI Thermal SDK not loaded")
@@ -65,24 +84,22 @@ def get_thermal_array(rjpeg_path, drone_model: str = "M3T"):
     if ret != 0:
         raise ValueError(f"Failed to decode RJPEG (error {ret}): {rjpeg_path}")
 
-    # Query actual resolution from SDK — avoids SIZE_NOT_MATCH (-8) on unexpected sensors
-    res = _DirpResolution()
-    ret_res = libdirp.dirp_get_rjpeg_resolution(ph, ctypes.byref(res))
-    if ret_res == 0 and res.width > 0 and res.height > 0:
-        w, h = res.width, res.height
-    else:
-        # Fallback to known drone resolution
-        w, h = DRONE_RESOLUTIONS.get(drone_model, (640, 512))
+    try:
+        res = _DirpResolution()
+        ret_res = libdirp.dirp_get_rjpeg_resolution(ph, ctypes.byref(res))
+        if ret_res == 0 and res.width > 0 and res.height > 0:
+            w, h = res.width, res.height
+        else:
+            w, h = DRONE_RESOLUTIONS.get(drone_model, (640, 512))
 
-    img_buf = (ctypes.c_int16 * (w * h))()
+        img_buf = (ctypes.c_int16 * (w * h))()
 
-    ret2 = libdirp.dirp_measure(ph, img_buf, ctypes.sizeof(img_buf))
-    if ret2 != 0:
+        ret2 = libdirp.dirp_measure(ph, img_buf, ctypes.sizeof(img_buf))
+        if ret2 != 0:
+            raise ValueError(f"Failed to measure thermal (error {ret2}): {rjpeg_path}")
+
+        arr = np.ctypeslib.as_array(img_buf).reshape((h, w)).astype(np.float32)
+        arr = arr / 10.0  # Convert to Celsius
+        return arr
+    finally:
         libdirp.dirp_destroy(ph)
-        raise ValueError(f"Failed to measure thermal (error {ret2}): {rjpeg_path}")
-
-    arr = np.ctypeslib.as_array(img_buf).reshape((h, w)).astype(np.float32)
-    arr = arr / 10.0  # Convert to Celsius
-
-    libdirp.dirp_destroy(ph)
-    return arr

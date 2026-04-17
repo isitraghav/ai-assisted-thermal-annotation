@@ -281,8 +281,13 @@ class AnnotationScreen(QWidget):
         
         try:
             from annotation_tool.data.projection_cache import _compute_delta_t
-            # Recompute for just this modified dict
-            _compute_delta_t(img_path, {shp_idx: new_coords}, temp_dict)
+            from annotation_tool.workers.projection_worker import _intr_wh_for_image
+            intr_wh = _intr_wh_for_image(self._project, img_path)
+            _compute_delta_t(
+                img_path, {shp_idx: new_coords}, temp_dict,
+                getattr(self._project, "drone_model", "M3T"),
+                intr_wh,
+            )
             self._current_delta_t_dict[shp_idx] = temp_dict.get(shp_idx)
             
             # also update the project instance if annotated
