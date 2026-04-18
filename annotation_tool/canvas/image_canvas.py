@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
     QGraphicsEllipseItem, QGraphicsTextItem, QGraphicsItem,
 )
 
-from annotation_tool.canvas.polygon_item import PolygonItem, PolygonVertex
+from annotation_tool.canvas.polygon_item import PolygonItem, PolygonVertex, RotationHandle
 
 _ZOOM_FACTOR = 1.15
 _MARKER_RADIUS = 6
@@ -183,8 +183,8 @@ class ImageCanvas(QGraphicsView):
             
             if items:
                 top_item = items[0]
-                # If we clicked a draggable vertex handle, let it handle the drag
-                if isinstance(top_item, PolygonVertex):
+                # If we clicked a draggable handle (vertex or rotation), let it handle the drag
+                if isinstance(top_item, (PolygonVertex, RotationHandle)):
                     super().mousePressEvent(event)
                     return
 

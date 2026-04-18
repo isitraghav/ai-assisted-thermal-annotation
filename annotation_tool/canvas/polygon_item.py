@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import math
+
 from PyQt5.QtCore import Qt, QPointF
 from PyQt5.QtGui import QColor, QPen, QBrush, QPolygonF
-from PyQt5.QtWidgets import QGraphicsPolygonItem, QGraphicsItem, QGraphicsEllipseItem
+from PyQt5.QtWidgets import (
+    QGraphicsPolygonItem, QGraphicsItem, QGraphicsEllipseItem, QGraphicsLineItem,
+)
 
 # Per-category fill colors (RGBA)
 _CATEGORY_COLORS: dict[str, tuple[int, int, int, int]] = {
@@ -25,11 +29,17 @@ _CATEGORY_COLORS: dict[str, tuple[int, int, int, int]] = {
 _COLOR_UNANNOTATED_FILL = QColor(255, 255, 255, 20)
 _COLOR_UNANNOTATED_LINE = QColor(255, 255, 255, 200)
 _COLOR_ANNOTATED_LINE   = QColor(255, 165, 0, 220)
-_COLOR_SELECTED_FILL    = QColor(180, 0, 0, 60)
-_COLOR_SELECTED_LINE    = QColor(180, 0, 0, 255)
+_COLOR_SELECTED_FILL    = QColor(0, 220, 255, 40)
+_COLOR_SELECTED_LINE    = QColor(0, 220, 255, 255)
+_COLOR_VERTEX_FILL      = QColor(255, 255, 255, 255)
+_COLOR_VERTEX_BORDER    = QColor(0, 180, 230, 255)
+_COLOR_VERTEX_HOVER     = QColor(255, 220, 0, 255)
+_COLOR_ROT_FILL         = QColor(0, 220, 255, 255)
+_COLOR_ROT_BORDER       = QColor(255, 255, 255, 255)
+_COLOR_ROT_LINE         = QColor(0, 220, 255, 180)
+_COLOR_CENTROID         = QColor(255, 220, 0, 255)
 _LINE_WIDTH_NORMAL   = 1.0
 _LINE_WIDTH_SELECTED = 2.5
-_SELECTION_INSET     = 5  # pixels inset on each side when selected
 
 
 class PolygonItem(QGraphicsPolygonItem):
@@ -72,6 +82,7 @@ class PolygonItem(QGraphicsPolygonItem):
         self.setZValue(1)
 
         self._handles: list[PolygonVertex] = []
+        self._rot_handle: RotationHandle | None = None
         self._apply_style()
 
     # ------------------------------------------------------------------
@@ -136,11 +147,59 @@ class PolygonItem(QGraphicsPolygonItem):
 
     def set_selected(self, selected: bool):
         if selected and not self._selected:
-            self._convert_to_resize_box()
-            
+            self._simplify_to_corners()
         self._selected = selected
         self._apply_style()
         self._update_handles()
+
+    def _simplify_to_corners(self):
+        from shapely.geometry import Polygon as ShapelyPoly
+        poly = self.polygon()
+        pts = [(poly.at(i).x(), poly.at(i).y()) for i in range(poly.count())]
+        if len(pts) < 3:
+            return
+        try:
+            simplified = ShapelyPoly(pts).simplify(1.5, preserve_topology=True)
+        except Exception:
+            return
+        if simplified.is_empty or simplified.geom_type != "Polygon":
+            return
+        corners = list(simplified.exterior.coords[:-1])  # drop closing duplicate
+        if len(corners) < 3:
+            return
+        self.setPolygon(QPolygonF([QPointF(x, y) for x, y in corners]))
+        self._pixel_coords = [[x, y] for x, y in corners]
+
+    def _centroid(self) -> QPointF:
+        poly = self.polygon()
+        n = poly.count()
+        cx = sum(poly.at(i).x() for i in range(n)) / n
+        cy = sum(poly.at(i).y() for i in range(n)) / n
+        return QPointF(cx, cy)
+
+    def _rot_anchor_pos(self) -> QPointF:
+        """Return snap position for rotation handle: below polygon, near centroid."""
+        rect = self.polygon().boundingRect()
+        cx = self._centroid().x()
+        return QPointF(cx, rect.bottom() + RotationHandle._OFFSET)
+
+    def rotate_by(self, delta_angle: float, centroid: QPointF):
+        poly = self.polygon()
+        cos_a = math.cos(delta_angle)
+        sin_a = math.sin(delta_angle)
+        new_pts = []
+        for i in range(poly.count()):
+            pt = poly.at(i)
+            dx = pt.x() - centroid.x()
+            dy = pt.y() - centroid.y()
+            new_pts.append(QPointF(
+                centroid.x() + dx * cos_a - dy * sin_a,
+                centroid.y() + dx * sin_a + dy * cos_a,
+            ))
+        self.setPolygon(QPolygonF(new_pts))
+        for i, handle in enumerate(self._handles):
+            if i < len(new_pts):
+                handle.setPos(new_pts[i])
 
     def set_annotated(self, anomaly_type: str | None):
         self._annotated = anomaly_type is not None
@@ -157,15 +216,22 @@ class PolygonItem(QGraphicsPolygonItem):
             if not self._handles:
                 poly = self.polygon()
                 for i in range(poly.count()):
-                    pt = poly.at(i)
                     handle = PolygonVertex(i, self)
-                    handle.setPos(pt)
+                    handle.setPos(poly.at(i))
                     self._handles.append(handle)
+            if self._rot_handle is None:
+                self._rot_handle = RotationHandle(self)
+                self._rot_handle.setPos(self._rot_anchor_pos())
         else:
             for handle in self._handles:
                 if self.scene():
                     self.scene().removeItem(handle)
             self._handles.clear()
+            if self._rot_handle is not None:
+                self._rot_handle.cleanup()
+                if self.scene():
+                    self.scene().removeItem(self._rot_handle)
+                self._rot_handle = None
 
     # ------------------------------------------------------------------
     def _apply_style(self):
@@ -187,14 +253,7 @@ class PolygonItem(QGraphicsPolygonItem):
 
     # ------------------------------------------------------------------
     def paint(self, painter, option, widget=None):
-        if self._selected:
-            i = _SELECTION_INSET
-            rect = self.polygon().boundingRect().adjusted(i, i, -i, -i)
-            painter.setBrush(self.brush())
-            painter.setPen(self.pen())
-            painter.drawRect(rect)
-        else:
-            super().paint(painter, option, widget)
+        super().paint(painter, option, widget)
 
     # ------------------------------------------------------------------
     def mouseReleaseEvent(self, event):
@@ -219,6 +278,8 @@ class PolygonItem(QGraphicsPolygonItem):
             for i, handle in enumerate(self._handles):
                 if i < new_poly.count():
                     handle.setPos(new_poly.at(i))
+            if self._rot_handle is not None:
+                self._rot_handle.setPos(self._rot_anchor_pos())
             # Notify screen
             if self.scene() and self.scene().views():
                 view = self.scene().views()[0]
@@ -239,17 +300,29 @@ class PolygonItem(QGraphicsPolygonItem):
 
 class PolygonVertex(QGraphicsEllipseItem):
     """Draggable vertex handle for PolygonItem."""
+    _RADIUS = 6  # half-size in px
+
     def __init__(self, index: int, parent_polygon: PolygonItem):
-        super().__init__(-4, -4, 8, 8, parent_polygon)
+        r = PolygonVertex._RADIUS
+        super().__init__(-r, -r, r * 2, r * 2, parent_polygon)
         self._index = index
         self._polygon = parent_polygon
-        self.setBrush(QBrush(QColor(255, 0, 0)))
-        self.setPen(QPen(QColor(0, 0, 0), 1))
+        self.setBrush(QBrush(_COLOR_VERTEX_FILL))
+        self.setPen(QPen(_COLOR_VERTEX_BORDER, 1.8))
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
         self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
-        self.setZValue(10)
-        self.setCursor(Qt.CrossCursor)
+        self.setAcceptHoverEvents(True)
+        self.setZValue(11)
+        self.setCursor(Qt.SizeAllCursor)
+
+    def hoverEnterEvent(self, event):
+        self.setBrush(QBrush(_COLOR_VERTEX_HOVER))
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        self.setBrush(QBrush(_COLOR_VERTEX_FILL))
+        super().hoverLeaveEvent(event)
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange and self.scene():
@@ -263,3 +336,98 @@ class PolygonVertex(QGraphicsEllipseItem):
         poly = self._polygon.polygon()
         if self._index < poly.count():
             self.setPos(poly.at(self._index))
+
+
+class RotationHandle(QGraphicsEllipseItem):
+    """Cyan handle above polygon — drag to rotate around centroid."""
+
+    _OFFSET = 18  # px gap below polygon bottom edge
+    _HANDLE_R = 8
+
+    def __init__(self, parent_polygon: PolygonItem):
+        r = RotationHandle._HANDLE_R
+        super().__init__(-r, -r, r * 2, r * 2, parent_polygon)
+        self._polygon = parent_polygon
+        self._drag_centroid: QPointF | None = None
+        self._last_angle: float | None = None
+
+        self.setBrush(QBrush(_COLOR_ROT_FILL))
+        self.setPen(QPen(_COLOR_ROT_BORDER, 2.0))
+        self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        self.setZValue(12)
+        self.setCursor(Qt.OpenHandCursor)
+
+        # Connection line from centroid to handle (child of polygon, not handle,
+        # so it isn't affected by ItemIgnoresTransformations)
+        self._line = QGraphicsLineItem(parent_polygon)
+        pen = QPen(_COLOR_ROT_LINE, 1.2, Qt.DashLine)
+        pen.setCosmetic(True)
+        self._line.setPen(pen)
+        self._line.setZValue(9)
+
+        # Centroid marker
+        self._centroid_dot = QGraphicsEllipseItem(-3, -3, 6, 6, parent_polygon)
+        self._centroid_dot.setBrush(QBrush(_COLOR_CENTROID))
+        self._centroid_dot.setPen(QPen(QColor(0, 0, 0), 1))
+        self._centroid_dot.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        self._centroid_dot.setZValue(11)
+
+        self._refresh_decoration()
+
+    def _refresh_decoration(self):
+        c = self._polygon._centroid()
+        self._centroid_dot.setPos(c)
+        p = self.pos()
+        self._line.setLine(c.x(), c.y(), p.x(), p.y())
+
+    def setPos(self, *args, **kwargs):
+        super().setPos(*args, **kwargs)
+        if hasattr(self, "_line"):
+            self._refresh_decoration()
+
+    def cleanup(self):
+        scene = self.scene()
+        if scene:
+            scene.removeItem(self._line)
+            scene.removeItem(self._centroid_dot)
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.LeftButton:
+            event.ignore()
+            return
+        c = self._polygon._centroid()
+        self._drag_centroid = c
+        sp = event.scenePos()
+        self._last_angle = math.atan2(-(sp.y() - c.y()), sp.x() - c.x())
+        self.setCursor(Qt.ClosedHandCursor)
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._last_angle is None:
+            event.ignore()
+            return
+        c = self._drag_centroid
+        sp = event.scenePos()
+        dx = sp.x() - c.x()
+        dy = sp.y() - c.y()
+        if dx * dx + dy * dy < 1:
+            event.accept()
+            return
+        angle = math.atan2(-dy, dx)
+        delta = (angle - self._last_angle + math.pi) % (2 * math.pi) - math.pi
+        self._polygon.rotate_by(-delta, c)  # reversed
+        self._last_angle = angle
+        self.setPos(sp)
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() != Qt.LeftButton:
+            event.ignore()
+            return
+        if self._drag_centroid is not None:
+            self._polygon.notify_vertex_changed()
+        self._drag_centroid = None
+        self._last_angle = None
+        self.setCursor(Qt.OpenHandCursor)
+        self.setPos(self._polygon._rot_anchor_pos())
+        event.accept()

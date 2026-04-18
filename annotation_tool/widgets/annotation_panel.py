@@ -5,9 +5,9 @@ from __future__ import annotations
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
     QPushButton, QGroupBox, QFormLayout,
-    QSizePolicy, QFrame, QScrollArea, QButtonGroup, QRadioButton,
+    QSizePolicy, QFrame, QButtonGroup, QRadioButton,
 )
 
 from annotation_tool.data.project import ANOMALY_TYPES, AnnotationRecord
@@ -210,22 +210,19 @@ class AnnotationPanel(QWidget):
         self._anomaly_group.setExclusive(True)
         self._radio_buttons: list[QRadioButton] = []
 
-        _scroll = QScrollArea()
-        _scroll.setFixedHeight(180)
-        _scroll.setWidgetResizable(True)
-        _scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        _radio_container = QWidget()
-        _radio_layout = QVBoxLayout(_radio_container)
-        _radio_layout.setContentsMargins(2, 2, 2, 2)
-        _radio_layout.setSpacing(1)
+        defect_container = QWidget()
+        defect_grid = QGridLayout(defect_container)
+        defect_grid.setContentsMargins(0, 0, 0, 0)
+        defect_grid.setHorizontalSpacing(6)
+        defect_grid.setVerticalSpacing(2)
+        _COLS = 2
         for i, anomaly in enumerate(ANOMALY_TYPES):
             btn = QRadioButton(anomaly)
             self._anomaly_group.addButton(btn, i)
-            _radio_layout.addWidget(btn)
+            defect_grid.addWidget(btn, i // _COLS, i % _COLS)
             self._radio_buttons.append(btn)
         self._radio_buttons[0].setChecked(True)
-        _scroll.setWidget(_radio_container)
-        props_layout.addRow("Defect:", _scroll)
+        props_layout.addRow("Defect:", defect_container)
 
         self._ed_delta_t = QLineEdit()
         self._ed_delta_t.setPlaceholderText("ΔT in °C")
